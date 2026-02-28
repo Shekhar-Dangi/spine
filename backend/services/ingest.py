@@ -1,0 +1,500 @@
+"""
+Ingestion service — full Phase 3 implementation.
+
+parse_book()    → parse PDF/EPUB, extract TOC, create draft chapters
+confirm_toc()   → user-confirmed chapters → chunk → embed → ChromaDB → READY
+delete_book_artefacts() → hard-delete all data for a book
+"""
+import json
+import re
+import shutil
+from pathlib import Path
+
+import chromadb
+import fitz  # PyMuPDF
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from config import settings
+from db.models import Book, BookFormat, Chapter, Chunk, IngestStatus
+
+
+# ---------------------------------------------------------------------------
+# ChromaDB client (module-level singleton)
+# ---------------------------------------------------------------------------
+
+_chroma: chromadb.ClientAPI | None = None
+
+
+def _get_chroma() -> chromadb.ClientAPI:
+    global _chroma
+    if _chroma is None:
+        _chroma = chromadb.PersistentClient(path=settings.chroma_path)
+    return _chroma
+
+
+# ---------------------------------------------------------------------------
+# PDF helpers
+# ---------------------------------------------------------------------------
+
+
+def _pdf_toc(file_path: str) -> tuple[list[dict], int]:
+    """
+    Extract TOC from PDF.
+    Falls back to heading heuristics if TOC is empty.
+    Returns (chapters, page_count).
+    """
+    doc = fitz.open(file_path)
+    page_count = len(doc)
+    toc = doc.get_toc()  # [[level, title, page], ...]
+
+    # Keep only level-1 entries (top-level chapters)
+    top = [(title.strip(), max(0, page - 1)) for level, title, page in toc if level == 1 and title.strip()]
+
+    # Fallback: heading heuristic — scan first 80 pages for large bold text
+    if not top:
+        top = _pdf_heading_fallback(doc)
+
+    # Last resort: treat entire book as one chapter
+    if not top:
+        doc.close()
+        return [{"index": 0, "title": "Full Book", "start_page": 0, "end_page": page_count - 1,
+                 "start_anchor": None, "end_anchor": None}], page_count
+
+    chapters = []
+    for i, (title, start) in enumerate(top):
+        end = top[i + 1][1] - 1 if i + 1 < len(top) else page_count - 1
+        chapters.append({
+            "index": i,
+            "title": title,
+            "start_page": start,
+            "end_page": end,
+            "start_anchor": None,
+            "end_anchor": None,
+        })
+
+    doc.close()
+    return chapters, page_count
+
+
+def _pdf_heading_fallback(doc: fitz.Document) -> list[tuple[str, int]]:
+    """Detect chapter headings by font size on first 80 pages."""
+    size_counts: dict[float, int] = {}
+    for page_num in range(min(80, len(doc))):
+        for block in doc[page_num].get_text("dict")["blocks"]:
+            for line in block.get("lines", []):
+                for span in line.get("spans", []):
+                    size_counts[span["size"]] = size_counts.get(span["size"], 0) + 1
+
+    if not size_counts:
+        return []
+
+    # Heading size = top ~15% of font sizes by frequency-weighted rank
+    sorted_sizes = sorted(size_counts.keys(), reverse=True)
+    body_size = sorted(size_counts.keys(), key=lambda s: size_counts[s], reverse=True)[0]
+    heading_threshold = body_size * 1.15
+
+    headings: list[tuple[str, int]] = []
+    seen: set[str] = set()
+    for page_num in range(len(doc)):
+        for block in doc[page_num].get_text("dict")["blocks"]:
+            text_parts = []
+            is_heading = False
+            for line in block.get("lines", []):
+                for span in line.get("spans", []):
+                    if span["size"] >= heading_threshold:
+                        is_heading = True
+                    text_parts.append(span["text"])
+            if is_heading:
+                title = " ".join(text_parts).strip()
+                if title and title not in seen and len(title) < 120:
+                    seen.add(title)
+                    headings.append((title, page_num))
+
+    return headings[:80]  # cap to avoid noise
+
+
+def _pdf_chapter_text(file_path: str, start_page: int, end_page: int) -> str:
+    doc = fitz.open(file_path)
+    pages = [doc[p].get_text() for p in range(start_page, min(end_page + 1, len(doc)))]
+    doc.close()
+    return "\n\n".join(pages)
+
+
+def _pdf_metadata(file_path: str) -> dict:
+    doc = fitz.open(file_path)
+    meta = doc.metadata or {}
+    doc.close()
+    return meta
+
+
+# ---------------------------------------------------------------------------
+# EPUB helpers
+# ---------------------------------------------------------------------------
+
+
+def _epub_toc(file_path: str) -> tuple[list[dict], int]:
+    from ebooklib import epub
+
+    ebook = epub.read_epub(file_path, options={"ignore_ncx": True})
+
+    def _flatten(items, depth=0):
+        result = []
+        for item in items:
+            if isinstance(item, tuple):
+                section, children = item
+                if hasattr(section, "href"):
+                    result.append(section)
+                result.extend(_flatten(children, depth + 1))
+            elif hasattr(item, "href"):
+                result.append(item)
+        return result
+
+    toc_links = _flatten(ebook.toc)
+
+    if toc_links:
+        chapters = [
+            {
+                "index": i,
+                "title": (getattr(link, "title", None) or f"Chapter {i + 1}").strip(),
+                "start_page": None,
+                "end_page": None,
+                "start_anchor": link.href.split("#")[0],
+                "end_anchor": None,
+            }
+            for i, link in enumerate(toc_links)
+        ]
+    else:
+        # Fallback: spine items
+        spine_ids = [sid for sid, _ in ebook.spine]
+        chapters = [
+            {
+                "index": i,
+                "title": f"Section {i + 1}",
+                "start_page": None,
+                "end_page": None,
+                "start_anchor": ebook.get_item_with_id(sid).get_name() if ebook.get_item_with_id(sid) else str(i),
+                "end_anchor": None,
+            }
+            for i, sid in enumerate(spine_ids)
+            if ebook.get_item_with_id(sid)
+        ]
+
+    return chapters, 0
+
+
+def _epub_chapter_text(file_path: str, start_anchor: str) -> str:
+    from ebooklib import epub
+
+    ebook = epub.read_epub(file_path, options={"ignore_ncx": True})
+    item = ebook.get_item_with_href(start_anchor)
+    if item is None:
+        return ""
+
+    raw = item.get_content().decode("utf-8", errors="ignore")
+    # Strip HTML tags and decode common entities
+    text = re.sub(r"<style[^>]*>.*?</style>", " ", raw, flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(r"<script[^>]*>.*?</script>", " ", text, flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(r"<[^>]+>", " ", text)
+    text = re.sub(r"&nbsp;", " ", text)
+    text = re.sub(r"&amp;", "&", text)
+    text = re.sub(r"&lt;", "<", text)
+    text = re.sub(r"&gt;", ">", text)
+    text = re.sub(r"&[a-zA-Z]+;", " ", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
+
+
+# ---------------------------------------------------------------------------
+# Chunking
+# ---------------------------------------------------------------------------
+
+
+def _chunk_text(text: str, max_words: int = 700, overlap_words: int = 80) -> list[str]:
+    """
+    Split text into chunks with overlap.
+    Splits on double-newlines (paragraphs) where possible,
+    then by word count.
+    """
+    paras = [p.strip() for p in re.split(r"\n{2,}", text) if p.strip()]
+    if not paras:
+        return [text.strip()] if text.strip() else []
+
+    chunks: list[str] = []
+    current: list[str] = []
+    current_words = 0
+
+    for para in paras:
+        para_word_count = len(para.split())
+        if current_words + para_word_count > max_words and current:
+            chunk = " ".join(current)
+            if chunk.strip():
+                chunks.append(chunk)
+            # Keep overlap from end of current chunk
+            overlap_text = " ".join(" ".join(current).split()[-overlap_words:])
+            current = [overlap_text, para] if overlap_text else [para]
+            current_words = len(" ".join(current).split())
+        else:
+            current.append(para)
+            current_words += para_word_count
+
+    if current:
+        chunk = " ".join(current)
+        if chunk.strip():
+            chunks.append(chunk)
+
+    return chunks
+
+
+# ---------------------------------------------------------------------------
+# Public service functions
+# ---------------------------------------------------------------------------
+
+
+async def parse_book(book_id: int, db: AsyncSession) -> None:
+    """
+    Parse the uploaded file, extract TOC, create draft Chapter rows.
+    Sets status: PARSING → PENDING_TOC_REVIEW (or FAILED).
+    """
+    book = await db.get(Book, book_id)
+    if book is None:
+        return
+
+    book.ingest_status = IngestStatus.PARSING
+    await db.commit()
+
+    try:
+        if book.format == BookFormat.PDF:
+            chapters, page_count = _pdf_toc(book.file_path)
+            meta = _pdf_metadata(book.file_path)
+            book.page_count = page_count
+            if meta.get("author"):
+                book.author = meta["author"][:256]
+            if meta.get("title", "").strip():
+                book.title = meta["title"].strip()[:512]
+        else:
+            chapters, _ = _epub_toc(book.file_path)
+
+        for ch in chapters:
+            db.add(Chapter(
+                book_id=book_id,
+                chapter_index=ch["index"],
+                title=ch["title"],
+                start_page=ch.get("start_page"),
+                end_page=ch.get("end_page"),
+                start_anchor=ch.get("start_anchor"),
+                end_anchor=ch.get("end_anchor"),
+                confirmed=False,
+            ))
+
+        book.ingest_status = IngestStatus.PENDING_TOC_REVIEW
+        await db.commit()
+
+    except Exception as exc:
+        book.ingest_status = IngestStatus.FAILED
+        book.ingest_error = str(exc)[:1000]
+        await db.commit()
+        raise
+
+
+async def confirm_toc(
+    book_id: int,
+    chapters: list[dict],
+    db: AsyncSession,
+) -> None:
+    """
+    Accept user-confirmed chapters → chunk → embed locally → ChromaDB → READY.
+    Embedding uses fastembed (local, free) — no provider/API key needed.
+    """
+    book = await db.get(Book, book_id)
+    if book is None:
+        return
+
+    book.ingest_status = IngestStatus.INGESTING
+    await db.commit()
+
+    try:
+        # Remove all draft chapters for this book
+        existing = (await db.execute(select(Chapter).where(Chapter.book_id == book_id))).scalars().all()
+        for ch in existing:
+            await db.delete(ch)
+        await db.flush()
+
+        parsed_dir = Path(settings.parsed_path) / str(book_id)
+        parsed_dir.mkdir(parents=True, exist_ok=True)
+
+        all_texts: list[str] = []
+        all_ids: list[str] = []
+        all_metas: list[dict] = []
+        quality_warnings: list[str] = []
+
+        for ch_data in chapters:
+            chapter = Chapter(
+                book_id=book_id,
+                chapter_index=ch_data["index"],
+                title=ch_data["title"],
+                start_page=ch_data.get("start_page"),
+                end_page=ch_data.get("end_page"),
+                start_anchor=ch_data.get("start_anchor"),
+                end_anchor=ch_data.get("end_anchor"),
+                confirmed=True,
+            )
+            db.add(chapter)
+            await db.flush()  # obtain chapter.id
+
+            # Extract chapter text
+            if book.format == BookFormat.PDF:
+                text = _pdf_chapter_text(
+                    book.file_path,
+                    ch_data.get("start_page") or 0,
+                    ch_data.get("end_page") or 0,
+                )
+            else:
+                text = _epub_chapter_text(
+                    book.file_path,
+                    ch_data.get("start_anchor") or "",
+                )
+
+            word_count = len(text.split())
+            if word_count < 50:
+                quality_warnings.append(
+                    f"Chapter '{ch_data['title']}' has very low text ({word_count} words) — may be image-based or a cover page."
+                )
+
+            # Persist text file
+            (parsed_dir / f"chapter_{ch_data['index']}.txt").write_text(text, encoding="utf-8")
+            chapter.token_estimate = word_count * 4 // 3
+
+            # Chunk
+            raw_chunks = _chunk_text(text)
+            if not raw_chunks:
+                raw_chunks = [text[:3000]] if text.strip() else []
+
+            for c_idx, chunk_text in enumerate(raw_chunks):
+                anchor = (
+                    f"p{ch_data.get('start_page', 0)}:{c_idx}"
+                    if book.format == BookFormat.PDF
+                    else f"{ch_data.get('start_anchor', '')}:{c_idx}"
+                )
+                chunk_id = f"b{book_id}_ch{chapter.id}_c{c_idx}"
+                db.add(Chunk(
+                    book_id=book_id,
+                    chapter_id=chapter.id,
+                    text=chunk_text,
+                    anchor=anchor,
+                    embedding_id=chunk_id,
+                ))
+                all_texts.append(chunk_text)
+                all_ids.append(chunk_id)
+                all_metas.append({"chapter_id": str(chapter.id), "book_id": str(book_id), "anchor": anchor})
+
+        await db.commit()
+
+        # Embed locally and upsert into ChromaDB in batches
+        if all_texts:
+            from services.embedder import embed_texts as local_embed
+            chroma = _get_chroma()
+            col = chroma.get_or_create_collection(
+                f"book_{book_id}",
+                metadata={"hnsw:space": "cosine"},
+            )
+            batch = 100  # fastembed is fast — larger batches are fine
+            for i in range(0, len(all_texts), batch):
+                embeddings = local_embed(all_texts[i: i + batch])
+                col.upsert(
+                    ids=all_ids[i: i + batch],
+                    embeddings=embeddings,
+                    documents=all_texts[i: i + batch],
+                    metadatas=all_metas[i: i + batch],
+                )
+
+        book.ingest_quality_json = json.dumps({"warnings": quality_warnings})
+        book.ingest_status = IngestStatus.READY
+        await db.commit()
+
+    except Exception as exc:
+        book.ingest_status = IngestStatus.FAILED
+        book.ingest_error = str(exc)[:1000]
+        await db.commit()
+        raise
+
+
+async def retry_embed(book_id: int, db: AsyncSession) -> None:
+    """
+    Re-run only the embedding step for a FAILED book.
+    Chunks are already in the DB from the previous confirm_toc() run —
+    this just re-embeds and upserts them into ChromaDB.
+    """
+    book = await db.get(Book, book_id)
+    if book is None:
+        return
+
+    book.ingest_status = IngestStatus.INGESTING
+    book.ingest_error = None
+    await db.commit()
+
+    try:
+        result = await db.execute(select(Chunk).where(Chunk.book_id == book_id).order_by(Chunk.id))
+        chunks = result.scalars().all()
+
+        if not chunks:
+            raise ValueError("No chunks found in database — the book may need to be re-uploaded and re-confirmed.")
+
+        from services.embedder import embed_texts as local_embed
+
+        chroma = _get_chroma()
+        col = chroma.get_or_create_collection(
+            f"book_{book_id}",
+            metadata={"hnsw:space": "cosine"},
+        )
+
+        all_texts = [c.text for c in chunks]
+        all_ids = [c.embedding_id or f"b{book_id}_fallback_{c.id}" for c in chunks]
+        all_metas = [
+            {"chapter_id": str(c.chapter_id), "book_id": str(book_id), "anchor": c.anchor or ""}
+            for c in chunks
+        ]
+
+        batch = 100
+        for i in range(0, len(all_texts), batch):
+            embeddings = local_embed(all_texts[i: i + batch])
+            col.upsert(
+                ids=all_ids[i: i + batch],
+                embeddings=embeddings,
+                documents=all_texts[i: i + batch],
+                metadatas=all_metas[i: i + batch],
+            )
+
+        book.ingest_status = IngestStatus.READY
+        book.ingest_error = None
+        await db.commit()
+
+    except Exception as exc:
+        book.ingest_status = IngestStatus.FAILED
+        book.ingest_error = str(exc)[:1000]
+        await db.commit()
+        raise
+
+
+async def delete_book_artefacts(book_id: int, file_path: str, db: AsyncSession) -> None:
+    """Hard-delete: file, parsed artefacts, ChromaDB collection, all DB rows."""
+    # ChromaDB
+    try:
+        _get_chroma().delete_collection(f"book_{book_id}")
+    except Exception:
+        pass
+
+    # Filesystem
+    upload = Path(file_path)
+    if upload.exists():
+        upload.unlink()
+
+    parsed_dir = Path(settings.parsed_path) / str(book_id)
+    if parsed_dir.exists():
+        shutil.rmtree(parsed_dir)
+
+    # DB (cascade handles children)
+    book = await db.get(Book, book_id)
+    if book:
+        await db.delete(book)
+        await db.commit()

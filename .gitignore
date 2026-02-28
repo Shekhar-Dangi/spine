@@ -1,0 +1,7 @@
+.claude
+CLAUDE.md
+PLAN.md
+backend/.env
+backend/requirements.txt
+backend/.venv
+backend/__pycache__

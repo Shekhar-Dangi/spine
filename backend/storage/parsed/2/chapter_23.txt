@@ -1,0 +1,400 @@
+THE DEMON-HAUNTED WORLD 
+future of their nation. There is evidence that science programming 
+can be successful, and that people hunger for more of it. I remain 
+hopeful that sooner or later we'll see real science skilfully and 
+appealingly presented as regular fare on major network television 
+worldwide. 
+Baseball and soccer have Aztec antecedents. Football is a thinly 
+disguised re-enactment of hunting; we played it before we were 
+human. Lacrosse is an ancient Native American game, and 
+hockey is related to it. But basketball is new. We've been making 
+movies longer than we've been playing basketball. 
+At first, they didn't think to make a hole in the peach basket so 
+the ball could be retrieved without climbing a flight of stairs. But 
+in the brief time since then, the game has evolved. In the hands 
+mainly of African-American players, basketball has become - at 
+its best - the paramount synthesis in sport of intelligence, preci-
+sion, courage, audacity, anticipation, artifice, teamwork, elegance 
+and grace. 
+Five-foot-three-inch Muggsy Bogues negotiates a forest of 
+giants: Michael Jordan sails in from some outer darkness 
+beyond the free-throw line; Larry Bird threads a precise, 
+no-look pass; Kareem Abdul-Jabbar unleashes a skyhook. This 
+is not fundamentally a contact sport like football. It's a game of 
+finesse. The full-court press, passes out of the double-team, the 
+pick-and-roll, cutting off the passing lanes, a tip-in from a 
+high-flying forward soaring from out of nowhere all constitute a 
+coordination of intellect and athleticism, a harmony of mind 
+and body. It's not surprising that the game has caught fire in 
+America. 
+Ever since National Basketball Association games became a 
+television staple, it's seemed to me that it could be used to teach 
+science and mathematics. To appreciate a free-throw average of 
+0.926, you must know something about converting fractions into 
+decimals. A lay-up is Newton's first law of motion in action. Every 
+shot represents the launching of a basketball on a parabolic arc, a 
+curve determined by the same gravitational physics that specifies 
+the flight of a ballistic missile, or the Earth orbiting the Sun, or a 
+spacecraft on its rendezvous with some distant world. The centre 
+
+
+Significance Junkies 
+of mass of the player's body during a slam dunk is briefly in orbit 
+about the centre of the Earth. 
+To get the ball in the basket, you must loft it at exactly the right 
+speed; a one per cent error and gravity will make you look bad. 
+Three-point shooters, whether they know it or not, compensate 
+for aerodynamic drag. Each successive bounce of a dropped 
+basketball is nearer to the ground because of the Second Law of 
+Thermodynamics. Daryl Dawkins or Shaquille O'Neal shattering 
+a backboard is an opportunity for teaching - among some other 
+things - the propagation of shock waves. A spin shot off the glass 
+from under the backboard goes in because of the conservation of 
+angular momentum. It's an infraction of the rules to touch the 
+basketball in 'the cylinder' above the basket; we're now talking 
+about a key mathematical idea: generating n-dimensional objects 
+by moving (n - l)-dimensional objects. 
+In the classroom, in newspapers and on television, why aren't 
+we using sports to teach science? 
+When I was growing up, my father would bring home a daily 
+paper and consume (often with great gusto) the baseball box 
+scores. There they were, to me dry as dust, with obscure abbrevia-
+tions (W, SS, K, W-L, AB, RBI), but they spoke to him. 
+Newspapers everywhere printed them. I figured maybe they 
+weren't too hard for me. Eventually I too got caught up in the 
+world of baseball statistics. (I know it helped me in learning 
+decimals, and I still cringe a little when I hear, usually at the very 
+beginning of the baseball season, that someone's 'batting a 
+thousand'. But 1.000 is not 1,000. The lucky player is batting one.) 
+Or take a look at the financial pages. Any introductory mate-
+rial? 
+Explanatory 
+footnotes? 
+Definitions of abbreviations? 
+Almost none. It's sink or swim. Look at those acres of statistics! 
+Yet people voluntarily read the stuff. It's not beyond their ability. 
+It's only a matter of motivation. Why can't we do the same with 
+maths, science and technology? 
+In every sport the players seem to perform in streaks. In basket-
+ball it's called the hot hand. You can do no wrong. I remember a 
+play-off game in which Michael Jordan, not ordinarily a superb 
+long-range shooter, was effortlessly making so many consecutive 
+347 
+
+
+THE DEMON-HAUNTED WORLD 
+three-point baskets from all over the floor that he shrugged his 
+shoulders in amazement at himself. In contrast, there are times 
+when you're cold, when nothing goes in. When a player is in the 
+groove he seems to be tapping into some mysterious power, and 
+when ice-cold he's under some kind of jinx or spell. But this is 
+magical, not scientific thinking. 
+Streakiness, far from being remarkable, is expected, even for 
+random events. What would be amazing would be no streaks. If I 
+flip a penny ten times in a row, I might get this sequence of heads 
+and tails: H H H T H T H H H H . Eight heads out of ten, and four 
+in a row! Was I exercising some psychokinetic control over my 
+penny? Was I in a heads groove? It looks much too regular to be 
+due to chance. 
+But then I remember that I was flipping before and after I got 
+this run of heads, that it's embedded in a much longer and less 
+interesting sequence: H H T H T T H H H T H T H H H H T H T 
+T H T H T T. If I'm permitted to pay attention to some results and 
+ignore others, I'll always be able to 'prove' there's something 
+exceptional about my streak. This is one of the fallacies in the 
+baloney detection kit, the enumeration of favourable circum-
+stances. We remember the hits and forget the misses. If your 
+ordinary field goal shooting percentage is 50 per cent and you 
+can't improve your statistics by an effort of will, you're exactly as 
+likely to have a hot hand in basketball as I am in coin-flipping. As 
+often as I get eight out of ten heads, you'll get eight out of ten 
+baskets. Basketball can teach something about probability and 
+statistics, as well as critical thinking. 
+An investigation by my colleague Tom Gilovich, professor of 
+psychology at Cornell, shows persuasively that our ordinary 
+understanding of the basketball streak is a misperception. 
+Gilovich studied whether shots made by NBA players tend to 
+cluster more than you'd expect by chance. After making one or 
+two or three baskets, players were no more likely to succeed than 
+after a missed basket. This was true for the great and the 
+near-great, not only for field goals but for free throws - where 
+there's no hand in your face. (Of course some attenuation of 
+shooting streaks can be attributed to increased attention by the 
+defence to the player with the 'hot hand'.) In baseball, there's the 
+348 
+
+
+Significance Junkies 
+related but contrary myth that someone batting below his average 
+is 'due' to make a hit. This is no more true than that a few heads in 
+a row makes the chance of flipping tails next time anything other 
+than 50 per cent. If there are streaks beyond what you'd expect 
+statistically, they're hard to find. 
+But somehow this doesn't satisfy. It doesn't feel true. Ask the 
+players, or the coaches, or the fans. We seek meaning, even in 
+random numbers. We're significance junkies. When the cel-
+ebrated coach Red Auerbach heard of Gilovich's study, his 
+response was: 'Who is this guy? So he makes a study. I couldn't 
+care less.' And you know exactly how he feels. But if basketball 
+streaks don't show up more often than sequences of heads or tails, 
+there's nothing magical about them. Does this reduce players to 
+mere marionettes, manipulated by the laws of chance? Certainly 
+not. Their average shooting percentages are a true reflection of 
+their personal skills. This is only about the frequency and duration 
+of streaks. 
+Of course, it's much more fun to think that the gods have 
+touched the player who's on a streak and scorned the one with a 
+cold hand. So what? What's the harm of a little mystification? It 
+sure beats boring statistical analyses. In basketball, in sports, no 
+harm. But as a habitual way of thinking, it gets us into trouble in 
+some of the other games we like to play. 
+'Scientist, yes; mad, no' giggles the mad scientist on 'Gilligan's 
+Island' as he adjusts the electronic device that permits him to 
+control the minds of others for his own nefarious purpose. 
+'I'm sorry, Dr Nerdnik, the people of Earth will not appreciate 
+being shrunk to three inches high, even if it will save room and 
+energy . . .' The cartoon superhero is patiently explaining an 
+ethical dilemma to the typical scientist portrayed on Saturday-
+morning children's television. 
+Many of these so-called scientists - judging from the pro-
+grammes I've seen (and plausible inference about ones I 
+haven't, such as the Mad Scientist's 'Toon Club) - are moral 
+cripples driven by a lust for power or endowed with a spectacu-
+lar insensitivity to the feelings of others. The message conveyed 
+to the moppet audience is that science is dangerous and 
+349 
+
+
+THE DEMON-HAUNTED WORLD 
+scientists worse than weird: they're crazed. 
+The applications of science, of course, can be dangerous, and, 
+as I've tried to stress, virtually every major technological advance 
+in the history of the human species - back to the invention of stone 
+tools and the domestication of fire - has been ethically ambiguous. 
+These advances can be used by ignorant or evil people for 
+dangerous purposes or by wise and good people for the benefit of 
+the human species. But only one side of the ambiguity ever seems 
+to be presented in these offerings to our children. 
+Where in these programmes are the joys of science? The 
+delights in discovering how the universe is put together? The 
+exhilaration in knowing a deep thing well? What about the crucial 
+contributions that science and technology have made to human 
+welfare, or the billions of lives saved or made possible by medical 
+and agricultural technology? (In fairness, though, I should men-
+tion that the Professor in 'Gilligan's Island' often used his knowledge 
+of science to solve practical problems for the castaways.) 
+We live in a complex age where many of the problems we face 
+can, whatever their origins, only have solutions that involve a 
+deep understanding of science and technology. Modern society 
+desperately needs the finest minds available to devise solutions to 
+these problems. I do not think that many gifted youngsters will be 
+encouraged towards a career in science or engineering by watch-
+ing Saturday-morning television - or much of the rest of the 
+available American video menu. 
+Over the years, a profusion of credulous, uncritical TV series 
+and 'specials' - on ESP, channelling, the Bermuda Triangle, 
+UFOs, ancient astronauts, Big Foot, and the like - have been 
+spawned. The style-setting series 'In Search of . . .' begins with a 
+disclaimer disavowing any responsibility to present a balanced 
+view of the subject. You can see a thirst for wonder here 
+untempered by even rudimentary scientific scepticism. Pretty 
+much whatever anyone says on camera is true. The idea that there 
+might be alternative explanations to be decided among by the 
+weight of evidence never surfaces. The same is true of 'Sightings' 
+and 'Unsolved Mysteries' - in which, as the very title suggests, 
+prosaic solutions are unwelcome - and innumerable other clones. 
+'In Search of . . .' frequently takes an intrinsically interesting 
+350 
+
+
+Significance Junkies 
+subject and systematically distorts the evidence. If there is a 
+mundane scientific explanation and one which requires the most 
+extravagant paranormal or psychic explanation, you can be sure 
+which will be highlighted. An almost random example: an author 
+is presented who argues that a major planet lies beyond Pluto. His 
+evidence is cylinder seals from ancient Sumer, carved long before 
+the invention of the telescope. His views are increasingly accepted 
+by professional astronomers, he says. Not a word is mentioned of 
+the failure of astronomers - studying the motions of Neptune, 
+Pluto and the four spacecraft beyond - to find a trace of the 
+alleged planet. 
+The graphics are indiscriminate. When an offscreen narrator is 
+talking about dinosaurs, we see a woolly mammoth. The narrator 
+describes a hovercraft; the screen shows a shuttle liftoff. We hear 
+about lakes and flood plains, but are shown mountains. It doesn't 
+matter. The visuals are as indifferent to the facts as is the voice-over. 
+A series called 'The X Files', which pays lip-service to sceptical 
+examination of the paranormal, is skewed heavily towards the 
+reality of alien abductions, strange powers and government com-
+plicity in covering up just about everything interesting. Almost 
+never does the paranormal claim turn out to be a hoax or a 
+psychological aberration or a misunderstanding of the natural 
+world. Much closer to reality, as well as a much greater public 
+service, would be an adult series ('Scooby Doo' does it for children) 
+in which paranormal claims are systematically investigated and 
+every case is found to be explicable in prosaic terms. The dramatic 
+tension would be in uncovering how misapprehension and hoax 
+could generate apparently genuine paranormal phenomena. Per-
+haps one of the investigators would always be disappointed, hoping 
+that next time an unambiguously paranormal case will survive 
+sceptical scrutiny. 
+Other shortcomings are evident in television science fiction 
+programming. 'Star Trek', for example, despite its charm and 
+strong international and interspecies perspective, often ignores 
+the most elementary scientific facts. The idea that Mr Spock could 
+be a cross between a human being and a life form independently 
+evolved on the planet Vulcan is genetically far less probable than a 
+successful cross of a man and an artichoke. The idea does, 
+351 
+
+
+THE DEMON-HAUNTED WORLD 
+however, provide a precedent in popular culture for the 
+extraterrestrial/human hybrids that later became so central a 
+component of the alien abduction story. There must be dozens of 
+alien species on the various 'Star Trek' TV series and movies. 
+Almost all we spend any time with are minor variants of humans. 
+This is driven by economic necessity, costing only an actor and a 
+latex mask, but it flies in the face of the stochastic nature of the 
+evolutionary process. If there are aliens, almost all of them I think 
+will look devastatingly less human than Klingons and Romulans 
+(and be at widely different levels of technology). 'Star Trek' 
+doesn't come to grips with evolution. 
+In many TV programmes and films, even the casual science -
+the throwaway lines that are not essential to a plot already 
+innocent of science - is done incompetently. It costs very little to 
+hire a graduate student to read the script for scientific accuracy. 
+But, so far as I can tell, this is almost never done. As a result we 
+have such howlers as 'parsec' mentioned as a unit of speed instead 
+of distance in the - in many other ways exemplary - film Star 
+Wars. If such things were done with a modicum of care, they 
+might even improve the plot; certainly, they might help convey a 
+little science to a mass audience. 
+There's a great deal of pseudoscience for the gullible on TV, 
+a fair amount of medicine and technology, but hardly any 
+science, especially on the big commercial networks, whose 
+executives tend to think that science programming means 
+ratings declines and lost profits, and nothing else matters. 
+There are network employees with the title 'Science Corre-
+spondent', and an occasional news feature said to be devoted to 
+science. But we almost never hear any science from them, just 
+medicine and technology. In all the networks, I doubt if there's 
+a single employee whose job it is to read each week's issue of 
+Nature or Science to see if anything newsworthy has been 
+discovered. When the Nobel Prizes in science are announced 
+each fall, there's a superb news 'hook' for science: a chance to 
+explain what the prizes were given for. But, almost always, all 
+we hear is something like '. . . may one day lead to a cure for 
+cancer. Today in Belgrade . . .' 
+How much science is there on the radio or television talk shows, 
+352 
+
+
+Significance Junkies 
+or on those dreary Sunday morning programmes in which middle-
+aged white people sit around agreeing with each other? When is 
+the last time you heard an intelligent comment on science by a 
+President of the United States? Why in all America is there no TV 
+drama that has as its hero someone devoted to figuring out how 
+the Universe works? When a highly publicized murder trial has 
+everyone casually mentioning DNA testing, where are the prime-
+time network specials devoted to nucleic acids and heredity? I 
+can't even recall seeing an accurate and comprehensible descrip-
+tion on television of how television works. 
+By far the most effective means of raising interest in science is 
+television. But this enormously powerful medium is doing close to 
+nothing to convey the joys and methods of science, while its 'mad 
+scientist' engine continues to huff and puff away. 
+In American polls in the early 1990s, two-thirds of all adults had 
+no idea what the 'information superhighway' was; 42 per cent 
+didn't know where Japan is; and 38 per cent were ignorant of the 
+term 'holocaust'. But the proportion was in the high 90s who had 
+heard of the Menendez, Bobbit and O.J. Simpson criminal cases; 
+99 per cent had heard that the singer Michael Jackson had 
+allegedly sexually molested a boy. The United States may be the 
+best-entertained nation on Earth, but a steep price is being paid. 
+Surveys in Canada and the United States in the same period 
+show that television viewers wish there were more science pro-
+gramming. In North America, often there's a good science 
+programme in the 'Nova' series of the Public Broadcasting 
+System, and occasionally on the Discovery or Learning Channels, 
+or the Canadian Broadcasting Company. Bill Nye's 'The Science 
+Guy' programmes for young children on PBS are fast-paced, 
+feature arresting graphics, range over many realms of science, and 
+sometimes even illuminate the process of discovery. But the depth 
+of public interest in science engrossingly and accurately presented 
+- to say nothing of the immense good that would result from 
+better public understanding of science - is not yet reflected in 
+network programming. 
+How could we put more science on television? Here are some 
+possibilities: 
+353 
+
+
+THE DEMON-HAUNTED WORLD 
+• The wonders and methods of science routinely presented on 
+news and talk programmes. There's real human drama in the 
+process of discovery. 
+• A series called 'Solved Mysteries', in which tremulous specula-
+tions have rational resolutions, including puzzling cases in 
+forensic medicine and epidemiology. 
+• 'Ring My Bells Again' - a series in which we relive the media 
+and the public falling hook, line and sinker for a coordinated 
+government lie. The first two episodes might be the Bay of 
+Tonkin 'incident' and the systematic irradiation of unsuspecting 
+and unprotected American civilians and military personnel in 
+the alleged requirements of 'national defence' following 1945. 
+• A separate series on fundamental misunderstandings and mis-
+takes made by famous scientists, national leaders and religious 
+figures. 
+• Regular exposes of pernicious pseudoscience, and audience-
+participation 'how-to' programmes: how to bend spoons, read 
+minds, appear to foretell the future, perform psychic surgery, 
+do cold reads, and press the TV viewers' personal buttons. 
+How we're bamboozled: learn by doing. 
+• A state-of-the-art computer graphics facility to prepare in advance 
+scientific visuals for a wide range of news contingencies. 
+• A set of inexpensive televised debates, each perhaps an hour 
+long, with a computer graphics budget for each side provided 
+by the producers, rigorous standards of evidence required by 
+the moderator, and the widest range of topics broached. They 
+could address issues where the scientific evidence is over-
+whelming, as on the matter of the shape of the Earth; contro-
+versial matters where the answer is less clear, such as the 
+survival of one's personality after death, or abortion, or animal 
+rights, or genetic engineering; or any of the presumptive 
+pseudosciences mentioned in this book. 
+There is a pressing national need for more public knowledge of 
+science. Television cannot provide it all by itself. But if we want to 
+make short-term improvements in the understanding of science, 
+television is the place to start. 
+354 
+
+
+23 
+Maxwell and The Nerds 
+Why should we subsidize intellectual curiosity? 
+Ronald Reagan, 
+campaign speech, 1980 
+There is nothing which can better deserve our patronage 
+than the promotion of science and literature. Knowledge is 
+in every country the surest basis of public happiness. 
+George Washington, 
+address to Congress, 8 January 1790 
+S
+tereotypes abound. Ethnic groups are stereotyped, the citizens 
+of other nations and religions are stereotyped, the genders and 
+sexual preferences are stereotyped, people born in various times 
+of the year are stereotyped (Sun-sign astrology), and occupations 
+are stereotyped. The most generous interpretation ascribes it to a 
+kind of intellectual laziness: instead of judging people on their 
+individual merits and deficits, we concentrate on one or two bits of 
+information about them, and then place them in a small number of 
+previously constructed pigeonholes. 
+This saves the trouble of thinking, at the price in many cases of 
+committing a profound injustice. It also shields the stereotyper 
+from contact with the enormous variety of people, the multiplicity 
+of ways of being human. Even if stereotyping were valid on 
+average, it is bound to fail in many individual cases: human 
+355 
