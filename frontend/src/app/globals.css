@@ -1,0 +1,38 @@
+@import "tailwindcss";
+@plugin "@tailwindcss/typography";
+
+/* Class-based dark mode — applied when <html class="dark"> */
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme inline {
+  --font-sans: var(--font-dm-sans);
+  --font-serif: var(--font-playfair);
+  --font-mono: var(--font-geist-mono);
+}
+
+/* ── Scrollbar ─────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #d6d3d1; border-radius: 9999px; }
+::-webkit-scrollbar-thumb:hover { background: #a8a29e; }
+html.dark ::-webkit-scrollbar-thumb { background: #44403c; }
+html.dark ::-webkit-scrollbar-thumb:hover { background: #78716c; }
+
+/* ── Text selection ─────────────────────────────────────────── */
+::selection { background: #d97706; color: #fff; }
+
+/* ── Base backgrounds (prevents flash at edges) ─────────────── */
+html { background: #fafaf9; }
+html.dark { background: #0c0a09; }
+
+body {
+  background: #fafaf9;
+  color: #1c1917;
+  font-family: var(--font-dm-sans), 'DM Sans', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+html.dark body {
+  background: #0c0a09;
+  color: #f5f5f4;
+}

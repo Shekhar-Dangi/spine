@@ -15,6 +15,6 @@ class OpenRouterAdapter(OpenAIAdapter):
             config = ProviderConfig(
                 api_key=config.api_key,
                 base_url=OPENROUTER_BASE_URL,
-                model_map=config.model_map,
+                model=config.model,
             )
         super().__init__(config)

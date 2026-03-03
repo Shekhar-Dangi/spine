@@ -29,8 +29,8 @@ async def generate_map(
     if not chapter or chapter.book_id != book_id:
         raise HTTPException(status_code=404, detail="Chapter not found.")
 
-    from providers.registry import get_active_provider
-    provider = await get_active_provider(db)
+    from providers.registry import get_provider_for_task
+    provider = await get_provider_for_task("map_extract", db)
 
     async def _task():
         async with AsyncSessionLocal() as bg_db:

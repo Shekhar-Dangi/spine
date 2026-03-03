@@ -12,11 +12,11 @@ from pathlib import Path
 
 import chromadb
 import fitz  # PyMuPDF
-from sqlalchemy import select
+from sqlalchemy import delete as sql_delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import settings
-from db.models import Book, BookFormat, Chapter, Chunk, IngestStatus
+from db.models import Book, BookFormat, Chapter, ChapterExplain, ChapterMap, Chunk, IngestStatus
 
 
 # ---------------------------------------------------------------------------
@@ -49,7 +49,8 @@ def _pdf_toc(file_path: str) -> tuple[list[dict], int]:
     toc = doc.get_toc()  # [[level, title, page], ...]
 
     # Keep only level-1 entries (top-level chapters)
-    top = [(title.strip(), max(0, page - 1)) for level, title, page in toc if level == 1 and title.strip()]
+    top = [(title.strip(), max(0, page - 1))
+           for level, title, page in toc if level == 1 and title.strip()]
 
     # Fallback: heading heuristic — scan first 80 pages for large bold text
     if not top:
@@ -84,14 +85,16 @@ def _pdf_heading_fallback(doc: fitz.Document) -> list[tuple[str, int]]:
         for block in doc[page_num].get_text("dict")["blocks"]:
             for line in block.get("lines", []):
                 for span in line.get("spans", []):
-                    size_counts[span["size"]] = size_counts.get(span["size"], 0) + 1
+                    size_counts[span["size"]] = size_counts.get(
+                        span["size"], 0) + 1
 
     if not size_counts:
         return []
 
     # Heading size = top ~15% of font sizes by frequency-weighted rank
     sorted_sizes = sorted(size_counts.keys(), reverse=True)
-    body_size = sorted(size_counts.keys(), key=lambda s: size_counts[s], reverse=True)[0]
+    body_size = sorted(size_counts.keys(),
+                       key=lambda s: size_counts[s], reverse=True)[0]
     heading_threshold = body_size * 1.15
 
     headings: list[tuple[str, int]] = []
@@ -116,7 +119,8 @@ def _pdf_heading_fallback(doc: fitz.Document) -> list[tuple[str, int]]:
 
 def _pdf_chapter_text(file_path: str, start_page: int, end_page: int) -> str:
     doc = fitz.open(file_path)
-    pages = [doc[p].get_text() for p in range(start_page, min(end_page + 1, len(doc)))]
+    pages = [doc[p].get_text() for p in range(
+        start_page, min(end_page + 1, len(doc)))]
     doc.close()
     return "\n\n".join(pages)
 
@@ -193,8 +197,10 @@ def _epub_chapter_text(file_path: str, start_anchor: str) -> str:
 
     raw = item.get_content().decode("utf-8", errors="ignore")
     # Strip HTML tags and decode common entities
-    text = re.sub(r"<style[^>]*>.*?</style>", " ", raw, flags=re.DOTALL | re.IGNORECASE)
-    text = re.sub(r"<script[^>]*>.*?</script>", " ", text, flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(r"<style[^>]*>.*?</style>", " ",
+                  raw, flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(r"<script[^>]*>.*?</script>", " ",
+                  text, flags=re.DOTALL | re.IGNORECASE)
     text = re.sub(r"<[^>]+>", " ", text)
     text = re.sub(r"&nbsp;", " ", text)
     text = re.sub(r"&amp;", "&", text)
@@ -362,7 +368,8 @@ async def confirm_toc(
                 )
 
             # Persist text file
-            (parsed_dir / f"chapter_{ch_data['index']}.txt").write_text(text, encoding="utf-8")
+            (parsed_dir /
+             f"chapter_{ch_data['index']}.txt").write_text(text, encoding="utf-8")
             chapter.token_estimate = word_count * 4 // 3
 
             # Chunk
@@ -386,7 +393,8 @@ async def confirm_toc(
                 ))
                 all_texts.append(chunk_text)
                 all_ids.append(chunk_id)
-                all_metas.append({"chapter_id": str(chapter.id), "book_id": str(book_id), "anchor": anchor})
+                all_metas.append(
+                    {"chapter_id": str(chapter.id), "book_id": str(book_id), "anchor": anchor})
 
         await db.commit()
 
@@ -438,7 +446,8 @@ async def retry_embed(book_id: int, db: AsyncSession) -> None:
         chunks = result.scalars().all()
 
         if not chunks:
-            raise ValueError("No chunks found in database — the book may need to be re-uploaded and re-confirmed.")
+            raise ValueError(
+                "No chunks found in database — the book may need to be re-uploaded and re-confirmed.")
 
         from services.embedder import embed_texts as local_embed
 
@@ -449,9 +458,11 @@ async def retry_embed(book_id: int, db: AsyncSession) -> None:
         )
 
         all_texts = [c.text for c in chunks]
-        all_ids = [c.embedding_id or f"b{book_id}_fallback_{c.id}" for c in chunks]
+        all_ids = [
+            c.embedding_id or f"b{book_id}_fallback_{c.id}" for c in chunks]
         all_metas = [
-            {"chapter_id": str(c.chapter_id), "book_id": str(book_id), "anchor": c.anchor or ""}
+            {"chapter_id": str(c.chapter_id), "book_id": str(
+                book_id), "anchor": c.anchor or ""}
             for c in chunks
         ]
 
@@ -474,6 +485,34 @@ async def retry_embed(book_id: int, db: AsyncSession) -> None:
         book.ingest_error = str(exc)[:1000]
         await db.commit()
         raise
+
+
+async def reset_and_reparse(book_id: int, db: AsyncSession) -> None:
+    """
+    Wipe all derived data for a book (chunks, chapters, explains, maps, ChromaDB
+    collection, parsed text files) and re-run parse_book() so the user can
+    review and confirm the TOC again.
+    """
+    # --- ChromaDB collection -------------------------------------------------
+    try:
+        _get_chroma().delete_collection(f"book_{book_id}")
+    except Exception:
+        pass
+
+    # --- Parsed text files ---------------------------------------------------
+    parsed_dir = Path(settings.parsed_path) / str(book_id)
+    if parsed_dir.exists():
+        shutil.rmtree(parsed_dir)
+
+    # --- Bulk-delete derived DB rows (order matters for FK integrity) ---------
+    await db.execute(sql_delete(ChapterMap).where(ChapterMap.book_id == book_id))
+    await db.execute(sql_delete(ChapterExplain).where(ChapterExplain.book_id == book_id))
+    await db.execute(sql_delete(Chunk).where(Chunk.book_id == book_id))
+    await db.execute(sql_delete(Chapter).where(Chapter.book_id == book_id))
+    await db.commit()
+
+    # --- Re-parse (sets status PARSING → PENDING_TOC_REVIEW) -----------------
+    await parse_book(book_id, db)
 
 
 async def delete_book_artefacts(book_id: int, file_path: str, db: AsyncSession) -> None:

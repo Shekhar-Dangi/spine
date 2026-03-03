@@ -51,6 +51,20 @@ class TocConfirmIn(BaseModel):
     chapters: list[TocChapterIn]
 
 
+class BookUpdateIn(BaseModel):
+    title: str | None = None
+    author: str | None = None
+
+
+class TocSuggestIn(BaseModel):
+    toc_pdf_page: int        # 1-indexed physical PDF page containing the TOC
+    page_offset: int = 0     # filler pages: pdf_page = book_page + page_offset
+
+
+class ChapterUpdateIn(BaseModel):
+    title: str
+
+
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
@@ -65,7 +79,8 @@ async def upload_book(
     """Save file, create Book row, trigger background parse."""
     ext = Path(file.filename or "").suffix.lower()
     if ext not in {".pdf", ".epub"}:
-        raise HTTPException(status_code=400, detail="Only PDF and EPUB files are supported.")
+        raise HTTPException(
+            status_code=400, detail="Only PDF and EPUB files are supported.")
 
     fmt = BookFormat.PDF if ext == ".pdf" else BookFormat.EPUB
     dest_name = f"{uuid.uuid4().hex}{ext}"
@@ -141,9 +156,11 @@ async def get_chapter_text(
     if not chapter or chapter.book_id != book_id:
         raise HTTPException(status_code=404, detail="Chapter not found.")
 
-    text_file = Path(settings.parsed_path) / str(book_id) / f"chapter_{chapter.chapter_index}.txt"
+    text_file = Path(settings.parsed_path) / str(book_id) / \
+        f"chapter_{chapter.chapter_index}.txt"
     if not text_file.exists():
-        raise HTTPException(status_code=404, detail="Chapter text not yet available.")
+        raise HTTPException(
+            status_code=404, detail="Chapter text not yet available.")
 
     return {"chapter_id": chapter_id, "text": text_file.read_text(encoding="utf-8")}
 
@@ -207,6 +224,125 @@ async def retry_embed(
     await db.commit()
 
     return {"book_id": book_id, "status": "ingesting"}
+
+
+@router.patch("/{book_id}", response_model=BookOut)
+async def update_book_metadata(
+    book_id: int,
+    body: BookUpdateIn,
+    db: AsyncSession = Depends(get_db),
+):
+    """Edit book title and/or author."""
+    book = await db.get(Book, book_id)
+    if not book:
+        raise HTTPException(status_code=404, detail="Book not found.")
+    if body.title is not None:
+        t = body.title.strip()
+        if not t:
+            raise HTTPException(
+                status_code=422, detail="Title cannot be empty.")
+        book.title = t[:512]
+    if body.author is not None:
+        book.author = body.author.strip()[:256] or None
+    await db.commit()
+    await db.refresh(book)
+    return book
+
+
+@router.post("/{book_id}/toc/suggest", response_model=dict)
+async def suggest_toc(
+    book_id: int,
+    body: TocSuggestIn,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Extract text from a PDF TOC page and ask the LLM to parse it into chapters.
+    Returns a suggestion list — does NOT save anything. The user reviews in the UI
+    and calls /toc/confirm to persist.
+    """
+    book = await db.get(Book, book_id)
+    if not book:
+        raise HTTPException(status_code=404, detail="Book not found.")
+    if book.format != BookFormat.PDF:
+        raise HTTPException(
+            status_code=400,
+            detail="TOC suggestion is only available for PDF books.",
+        )
+
+    from services.toc_suggest import suggest_toc as _suggest
+    try:
+        chapters = await _suggest(
+            file_path=book.file_path,
+            toc_pdf_page=body.toc_pdf_page,
+            page_offset=body.page_offset,
+            db=db,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+    return {"chapters": chapters}
+
+
+@router.patch("/{book_id}/chapters/{chapter_id}", response_model=dict)
+async def update_chapter(
+    book_id: int,
+    chapter_id: int,
+    body: ChapterUpdateIn,
+    db: AsyncSession = Depends(get_db),
+):
+    """Edit a chapter title (post-ingestion, title-only)."""
+    chapter = await db.get(Chapter, chapter_id)
+    if not chapter or chapter.book_id != book_id:
+        raise HTTPException(status_code=404, detail="Chapter not found.")
+    t = body.title.strip()
+    if not t:
+        raise HTTPException(status_code=422, detail="Title cannot be empty.")
+    chapter.title = t[:512]
+    await db.commit()
+    return {
+        "id": chapter.id,
+        "index": chapter.chapter_index,
+        "title": chapter.title,
+        "start_page": chapter.start_page,
+        "end_page": chapter.end_page,
+        "start_anchor": chapter.start_anchor,
+        "end_anchor": chapter.end_anchor,
+        "confirmed": chapter.confirmed,
+        "token_estimate": chapter.token_estimate,
+    }
+
+
+@router.post("/{book_id}/reset-toc", response_model=dict)
+async def reset_toc(
+    book_id: int,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Wipe all derived data (chunks, chapters, embeddings, explains, maps) and
+    re-run parsing so the user can review and confirm the TOC again.
+    Only allowed when the book is not currently parsing or ingesting.
+    """
+    book = await db.get(Book, book_id)
+    if not book:
+        raise HTTPException(status_code=404, detail="Book not found.")
+    if book.ingest_status in (IngestStatus.PARSING, IngestStatus.INGESTING):
+        raise HTTPException(
+            status_code=409,
+            detail=f"Cannot reset while book is {book.ingest_status}. Wait for it to finish.",
+        )
+
+    # Optimistically flip to PARSING so the UI poll loop activates
+    book.ingest_status = IngestStatus.PARSING
+    book.ingest_error = None
+    await db.commit()
+
+    async def _task():
+        async with AsyncSessionLocal() as bg_db:
+            await ingest_svc.reset_and_reparse(book_id, bg_db)
+
+    background_tasks.add_task(_task)
+    return {"book_id": book_id, "status": "parsing"}
 
 
 @router.delete("/{book_id}", response_model=dict)

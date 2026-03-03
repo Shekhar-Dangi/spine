@@ -139,7 +139,8 @@ async def _tavily_searches(title: str, author: str) -> dict[str, object]:
                 "citations": citations,
             }
         except Exception as exc:
-            log.warning("Tavily search failed for section %s: %s", section, exc)
+            log.warning(
+                "Tavily search failed for section %s: %s", section, exc)
             results[section] = {"context": "", "citations": []}
 
     return results
@@ -174,7 +175,7 @@ async def _generate_section(
         {"role": "user", "content": prompt},
     ]
     try:
-        return await provider.generate_text("extract", messages, max_tokens=1024)
+        return await provider.generate_text(messages, max_tokens=1024)
     except Exception as exc:
         log.error("Section generation failed for %s: %s", section_type, exc)
         return f"[Generation failed: {exc}]"
@@ -205,7 +206,8 @@ async def generate_dossier(
     try:
         # Clear any previous sections (regeneration case)
         await db.execute(
-            delete(DossierSection).where(DossierSection.dossier_id == dossier.id)
+            delete(DossierSection).where(
+                DossierSection.dossier_id == dossier.id)
         )
         await db.commit()
 
@@ -220,8 +222,10 @@ async def generate_dossier(
         # Generate and persist each section
         for section_type in _SECTION_ORDER:
             section_result = web_data.get(section_type, {})
-            web_context = section_result.get("context", "")  # type: ignore[union-attr]
-            citations = section_result.get("citations", [])  # type: ignore[union-attr]
+            web_context = section_result.get(
+                "context", "")  # type: ignore[union-attr]
+            citations = section_result.get(
+                "citations", [])  # type: ignore[union-attr]
 
             content = await _generate_section(
                 section_type,
@@ -244,7 +248,8 @@ async def generate_dossier(
         dossier.generated_at = datetime.now(timezone.utc)
         dossier.version = (dossier.version or 0) + 1
         await db.commit()
-        log.info("Dossier generated for book %d (version %d)", book_id, dossier.version)
+        log.info("Dossier generated for book %d (version %d)",
+                 book_id, dossier.version)
 
     except Exception as exc:
         log.error("generate_dossier failed for book %d: %s", book_id, exc)

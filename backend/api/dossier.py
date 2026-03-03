@@ -30,8 +30,8 @@ async def generate_dossier(
     if book.ingest_status != IngestStatus.READY:
         raise HTTPException(status_code=409, detail="Book is not ready yet.")
 
-    from providers.registry import get_active_provider
-    provider = await get_active_provider(db)
+    from providers.registry import get_provider_for_task
+    provider = await get_provider_for_task("dossier", db)
 
     # Create (or reset) the Dossier row so GET /dossier returns "generating" state
     result = await db.execute(select(Dossier).where(Dossier.book_id == book_id))
@@ -62,7 +62,8 @@ async def get_dossier(book_id: int, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Dossier).where(Dossier.book_id == book_id))
     dossier = result.scalar_one_or_none()
     if not dossier:
-        raise HTTPException(status_code=404, detail="Dossier not generated yet.")
+        raise HTTPException(
+            status_code=404, detail="Dossier not generated yet.")
 
     sections_result = await db.execute(
         select(DossierSection).where(DossierSection.dossier_id == dossier.id)

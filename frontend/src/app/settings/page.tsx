@@ -1,0 +1,32 @@
+import ProfileManager from "@/components/settings/ProfileManager";
+import { TaskRoutingManager } from "@/components/settings/ProfileManager";
+import Link from "next/link";
+import ThemeToggle from "@/components/ui/ThemeToggle";
+
+export default function SettingsPage() {
+  return (
+    <div className="min-h-screen bg-stone-50 dark:bg-stone-950 text-stone-900 dark:text-stone-100">
+      <header className="border-b border-stone-200 dark:border-stone-800 bg-stone-50/80 dark:bg-stone-950/80 backdrop-blur-sm sticky top-0 z-10">
+        <div className="max-w-2xl mx-auto px-8 py-4 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <Link
+              href="/"
+              className="text-sm text-stone-400 dark:text-stone-500 hover:text-stone-700 dark:hover:text-stone-300 transition-colors"
+            >
+              ← Library
+            </Link>
+            <span className="text-stone-300 dark:text-stone-700">·</span>
+            <span className="font-serif italic text-stone-900 dark:text-stone-100">Settings</span>
+          </div>
+          <ThemeToggle />
+        </div>
+      </header>
+
+      <main className="max-w-2xl mx-auto px-8 py-10 space-y-12">
+        <ProfileManager />
+        <hr className="border-stone-200 dark:border-stone-800" />
+        <TaskRoutingManager />
+      </main>
+    </div>
+  );
+}
