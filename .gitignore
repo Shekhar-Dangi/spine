@@ -2,6 +2,8 @@
 .claude/
 CLAUDE.md
 PLAN.md
+DEPLOY.md
+deployment_plan.md
 
 # ──── OS / Editor ────
 .DS_Store
