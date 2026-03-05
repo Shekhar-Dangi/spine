@@ -5,6 +5,7 @@ parse_book()    → parse PDF/EPUB, extract TOC, create draft chapters
 confirm_toc()   → user-confirmed chapters → chunk → embed → ChromaDB → READY
 delete_book_artefacts() → hard-delete all data for a book
 """
+import asyncio
 import json
 import re
 import shutil
@@ -271,15 +272,15 @@ async def parse_book(book_id: int, db: AsyncSession) -> None:
 
     try:
         if book.format == BookFormat.PDF:
-            chapters, page_count = _pdf_toc(book.file_path)
-            meta = _pdf_metadata(book.file_path)
+            chapters, page_count = await asyncio.to_thread(_pdf_toc, book.file_path)
+            meta = await asyncio.to_thread(_pdf_metadata, book.file_path)
             book.page_count = page_count
             if meta.get("author"):
                 book.author = meta["author"][:256]
             if meta.get("title", "").strip():
                 book.title = meta["title"].strip()[:512]
         else:
-            chapters, _ = _epub_toc(book.file_path)
+            chapters, _ = await asyncio.to_thread(_epub_toc, book.file_path)
 
         for ch in chapters:
             db.add(Chapter(
@@ -348,15 +349,17 @@ async def confirm_toc(
             db.add(chapter)
             await db.flush()  # obtain chapter.id
 
-            # Extract chapter text
+            # Extract chapter text (run sync file I/O off the event loop)
             if book.format == BookFormat.PDF:
-                text = _pdf_chapter_text(
+                text = await asyncio.to_thread(
+                    _pdf_chapter_text,
                     book.file_path,
                     ch_data.get("start_page") or 0,
                     ch_data.get("end_page") or 0,
                 )
             else:
-                text = _epub_chapter_text(
+                text = await asyncio.to_thread(
+                    _epub_chapter_text,
                     book.file_path,
                     ch_data.get("start_anchor") or "",
                 )
@@ -399,6 +402,8 @@ async def confirm_toc(
         await db.commit()
 
         # Embed locally and upsert into ChromaDB in batches
+        # Both fastembed inference and ChromaDB upsert are CPU-bound sync
+        # operations — run them in a thread pool to keep the event loop free.
         if all_texts:
             from services.embedder import embed_texts as local_embed
             chroma = _get_chroma()
@@ -406,13 +411,15 @@ async def confirm_toc(
                 f"book_{book_id}",
                 metadata={"hnsw:space": "cosine"},
             )
-            batch = 100  # fastembed is fast — larger batches are fine
+            batch = 100
             for i in range(0, len(all_texts), batch):
-                embeddings = local_embed(all_texts[i: i + batch])
-                col.upsert(
+                batch_texts = all_texts[i: i + batch]
+                embeddings = await asyncio.to_thread(local_embed, batch_texts)
+                await asyncio.to_thread(
+                    col.upsert,
                     ids=all_ids[i: i + batch],
                     embeddings=embeddings,
-                    documents=all_texts[i: i + batch],
+                    documents=batch_texts,
                     metadatas=all_metas[i: i + batch],
                 )
 
@@ -468,11 +475,13 @@ async def retry_embed(book_id: int, db: AsyncSession) -> None:
 
         batch = 100
         for i in range(0, len(all_texts), batch):
-            embeddings = local_embed(all_texts[i: i + batch])
-            col.upsert(
+            batch_texts = all_texts[i: i + batch]
+            embeddings = await asyncio.to_thread(local_embed, batch_texts)
+            await asyncio.to_thread(
+                col.upsert,
                 ids=all_ids[i: i + batch],
                 embeddings=embeddings,
-                documents=all_texts[i: i + batch],
+                documents=batch_texts,
                 metadatas=all_metas[i: i + batch],
             )
 

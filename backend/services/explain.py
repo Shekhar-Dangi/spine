@@ -1,6 +1,6 @@
 """
 Chapter deep-explain service — multi-mode implementation.
-Supports 5 learning modes: story, first_principles, systems, derivation, synthesis.
+Supports 5 built-in learning modes + user-defined custom modes.
 Each mode is independently cached in chapter_explains(chapter_id, mode).
 """
 from datetime import datetime, timezone
@@ -267,7 +267,41 @@ _MODE_PROMPTS: dict[str, str] = {
 VALID_MODES = frozenset(_MODE_PROMPTS.keys())
 
 # Rough character limit to stay within a 128k token context (leaving room for response)
-_MAX_CHAPTER_CHARS = 200_000  # ~50k tokens
+_MAX_CHAPTER_CHARS = 200_000
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+async def _persist_explain(
+    db: AsyncSession,
+    book_id: int,
+    chapter_id: int,
+    mode: str,
+    content: str,
+) -> None:
+    """Upsert explain content to DB."""
+    result = await db.execute(
+        select(ChapterExplain).where(
+            ChapterExplain.chapter_id == chapter_id,
+            ChapterExplain.mode == mode,
+        )
+    )
+    existing = result.scalar_one_or_none()
+    if existing:
+        existing.content = content
+        existing.generated_at = datetime.now(timezone.utc)
+    else:
+        db.add(ChapterExplain(
+            book_id=book_id,
+            chapter_id=chapter_id,
+            mode=mode,
+            content=content,
+            generated_at=datetime.now(timezone.utc),
+        ))
+    await db.commit()
 
 
 # ---------------------------------------------------------------------------
@@ -282,8 +316,9 @@ async def stream_explain(
     provider,
     mode: str = "story",
     force: bool = False,
+    template_override: str | None = None,
 ) -> AsyncIterator[str]:
-    if mode not in VALID_MODES:
+    if mode not in VALID_MODES and not template_override:
         yield f"Error: unknown explain mode '{mode}'."
         return
 
@@ -313,14 +348,21 @@ async def stream_explain(
         yield "No text found for this chapter. It may be image-based or empty."
         return
 
-    template = _MODE_PROMPTS[mode]
-    prompt = template.format(
-        book_title=book.title,
-        author=book.author or "Unknown",
-        chapter_num=chapter.chapter_index + 1,
-        chapter_title=chapter.title,
-        chapter_text=chapter_text[:_MAX_CHAPTER_CHARS],
-    )
+    template = template_override if template_override else _MODE_PROMPTS[mode]
+    try:
+        prompt = template.format(
+            book_title=book.title,
+            author=book.author or "Unknown",
+            chapter_num=chapter.chapter_index + 1,
+            chapter_title=chapter.title,
+            chapter_text=chapter_text[:_MAX_CHAPTER_CHARS],
+        )
+    except KeyError as exc:
+        yield (
+            f"Error: template contains unknown variable {exc}. "
+            "Available: {book_title}, {author}, {chapter_num}, {chapter_title}, {chapter_text}."
+        )
+        return
 
     messages = [
         {"role": "system", "content": _SYSTEM},
@@ -328,32 +370,54 @@ async def stream_explain(
     ]
 
     accumulated: list[str] = []
-    async for delta in provider.stream_text(messages, max_tokens=16000):
-        accumulated.append(delta)
-        yield delta
+    try:
+        async for delta in provider.stream_text(messages, max_tokens=16000):
+            accumulated.append(delta)
+            yield delta
+    finally:
+        # Always persist accumulated content, even if client disconnected mid-stream
+        full_content = "".join(accumulated)
+        if full_content.strip():
+            await _persist_explain(db, book_id, chapter_id, mode, full_content)
 
-    # Persist to DB after stream completes
-    full_content = "".join(accumulated)
-    if full_content.strip():
-        result = await db.execute(
-            select(ChapterExplain).where(
-                ChapterExplain.chapter_id == chapter_id,
-                ChapterExplain.mode == mode,
-            )
-        )
-        existing = result.scalar_one_or_none()
-        if existing:
-            existing.content = full_content
-            existing.generated_at = datetime.now(timezone.utc)
-        else:
-            db.add(ChapterExplain(
-                book_id=book_id,
-                chapter_id=chapter_id,
-                mode=mode,
-                content=full_content,
-                generated_at=datetime.now(timezone.utc),
-            ))
-        await db.commit()
+
+async def stream_explain_chat(
+    question: str,
+    explain_content: str,
+    history: list[dict],
+    provider,
+) -> AsyncIterator[str]:
+    """Stream a chat response grounded in the chapter explanation content."""
+    chat_system = (
+        _SYSTEM
+        + "\n\nYou are discussing a chapter explanation with a reader. "
+        "Help them understand the concepts more deeply based on the explanation provided. "
+        "Answer concisely and precisely."
+    )
+
+    # Cap explanation content to avoid context overflow
+    capped = explain_content[:30_000]
+
+    messages: list[dict] = [
+        {"role": "system", "content": chat_system},
+        {
+            "role": "user",
+            "content": (
+                f"Here is a chapter explanation I want to discuss:\n\n{capped}\n\n---\n\n"
+                "I have questions about this explanation."
+            ),
+        },
+        {
+            "role": "assistant",
+            "content": "I understand the explanation. What would you like to explore or clarify?",
+        },
+        # Previous conversation turns
+        *[{"role": m["role"], "content": m["content"]} for m in history],
+        {"role": "user", "content": question},
+    ]
+
+    async for delta in provider.stream_text(messages, max_tokens=4000):
+        yield delta
 
 
 async def _load_chapter_text(book_id: int, chapter: Chapter, db: AsyncSession) -> str:

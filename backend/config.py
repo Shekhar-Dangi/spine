@@ -1,3 +1,5 @@
+import os
+import secrets
 from pathlib import Path
 from pydantic_settings import BaseSettings
 
@@ -9,6 +11,19 @@ PARSED_DIR = STORAGE_DIR / "parsed"
 DB_PATH = STORAGE_DIR / "spine.db"
 CHROMA_DIR = STORAGE_DIR / "chroma"
 KEY_FILE = STORAGE_DIR / ".spine.key"
+JWT_SECRET_FILE = STORAGE_DIR / ".jwt_secret"
+
+
+def _load_or_create_jwt_secret() -> str:
+    """Load JWT secret from env var, then file, or generate and persist a new one."""
+    env_val = os.environ.get("SPINE_JWT_SECRET", "").strip()
+    if env_val:
+        return env_val
+    if JWT_SECRET_FILE.exists():
+        return JWT_SECRET_FILE.read_text().strip()
+    secret = secrets.token_hex(32)
+    JWT_SECRET_FILE.write_text(secret)
+    return secret
 
 
 class Settings(BaseSettings):
@@ -21,6 +36,11 @@ class Settings(BaseSettings):
     key_file_path: str = str(KEY_FILE)
     # Tavily key loaded from environment; never stored in DB
     tavily_api_key: str = ""
+    # Auth
+    jwt_secret: str = ""  # overridden post-init from file
+    jwt_expire_minutes: int = 43200  # 30 days
+    cookie_secure: bool = False  # set True in production via env
+    cors_origins: str = "http://localhost:3000"
 
     class Config:
         env_file = BASE_DIR / ".env"
@@ -32,3 +52,7 @@ settings = Settings()
 # Ensure directories exist at import time
 for _dir in (UPLOADS_DIR, PARSED_DIR, CHROMA_DIR):
     _dir.mkdir(parents=True, exist_ok=True)
+
+# Load/create JWT secret after storage dirs exist
+if not settings.jwt_secret:
+    settings.jwt_secret = _load_or_create_jwt_secret()

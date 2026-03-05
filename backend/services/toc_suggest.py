@@ -36,12 +36,13 @@ Raw TOC text:
 
 async def suggest_toc(
     file_path: str,
-    toc_pdf_page: int,   # 1-indexed physical PDF page
-    page_offset: int,    # filler pages before content: pdf_page = book_page + page_offset
+    toc_pdf_page: int,            # 1-indexed physical PDF page (start)
+    page_offset: int,             # filler pages before content: pdf_page = book_page + page_offset
     db: AsyncSession,
+    toc_pdf_page_end: int | None = None,  # 1-indexed end page (inclusive); defaults to start
 ) -> list[dict]:
     """
-    Return a list of suggested chapters from the given PDF TOC page.
+    Return a list of suggested chapters from the given PDF TOC page range.
 
     Each entry:
       index       — 0-based order
@@ -54,20 +55,28 @@ async def suggest_toc(
     """
     doc = fitz.open(file_path)
     total_pages = len(doc)
-    page_idx = toc_pdf_page - 1  # convert to 0-indexed
 
-    if page_idx < 0 or page_idx >= total_pages:
+    end_page = toc_pdf_page_end if toc_pdf_page_end else toc_pdf_page
+    if end_page < toc_pdf_page:
+        end_page = toc_pdf_page
+
+    start_idx = toc_pdf_page - 1  # 0-indexed
+    end_idx = end_page - 1        # 0-indexed, inclusive
+
+    if start_idx < 0 or start_idx >= total_pages:
         doc.close()
         raise ValueError(
             f"Page {toc_pdf_page} is out of range — book has {total_pages} pages."
         )
+    end_idx = min(end_idx, total_pages - 1)
 
-    page_text = doc[page_idx].get_text("text")
+    page_texts = [doc[i].get_text("text") for i in range(start_idx, end_idx + 1)]
     doc.close()
+    page_text = "\n".join(page_texts)
 
     if not page_text.strip():
         raise ValueError(
-            "The specified page appears to be empty or image-only. "
+            "The specified page(s) appear to be empty or image-only. "
             "Only text-based PDFs are supported."
         )
 

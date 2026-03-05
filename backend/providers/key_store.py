@@ -12,6 +12,9 @@ from config import settings
 
 
 def _load_or_create_fernet() -> Fernet:
+    env_val = os.environ.get("SPINE_FERNET_KEY", "").strip()
+    if env_val:
+        return Fernet(env_val.encode())
     key_path = Path(settings.key_file_path)
     if key_path.exists():
         raw = key_path.read_bytes()

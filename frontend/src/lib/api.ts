@@ -3,10 +3,13 @@
  * All endpoints mirror the backend API surface from PLAN.md.
  */
 
-const BASE = "http://localhost:8000";
+const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, init);
+  const res = await fetch(`${BASE}${path}`, {
+    credentials: "include",
+    ...init,
+  });
   if (!res.ok) {
     const text = await res.text();
     throw new Error(`API ${res.status}: ${text}`);
@@ -19,6 +22,35 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 // ---------------------------------------------------------------------------
 
 export const api = {
+  auth: {
+    login: (username_or_email: string, password: string) =>
+      req<import("@/types").UserOut>("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username_or_email, password }),
+      }),
+    logout: () =>
+      req<{ ok: boolean }>("/api/auth/logout", { method: "POST" }),
+    me: () => req<import("@/types").UserOut>("/api/auth/me"),
+    register: (
+      invite_code: string,
+      username: string,
+      email: string,
+      password: string,
+    ) =>
+      req<import("@/types").UserOut>("/api/auth/register", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ invite_code, username, email, password }),
+      }),
+    createInvite: () =>
+      req<{ code: string; url: string }>("/api/auth/invites", {
+        method: "POST",
+      }),
+    listInvites: () =>
+      req<import("@/types").InviteOut[]>("/api/auth/invites"),
+  },
+
   books: {
     upload: (file: File) => {
       const fd = new FormData();
@@ -50,13 +82,13 @@ export const api = {
           body: JSON.stringify({ chapters }),
         },
       ),
-    suggestToc: (bookId: number, toc_pdf_page: number, page_offset: number) =>
+    suggestToc: (bookId: number, toc_pdf_page: number, page_offset: number, toc_pdf_page_end?: number) =>
       req<{ chapters: import("@/types").SuggestedChapter[] }>(
         `/api/books/${bookId}/toc/suggest`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ toc_pdf_page, page_offset }),
+          body: JSON.stringify({ toc_pdf_page, toc_pdf_page_end: toc_pdf_page_end ?? null, page_offset }),
         },
       ),
     resetToc: (bookId: number) =>
@@ -103,7 +135,7 @@ export const api = {
   },
 
   explain: {
-    getCached: (bookId: number, chapterId: number, mode: import("@/types").ExplainMode = "story") =>
+    getCached: (bookId: number, chapterId: number, mode: string = "story") =>
       req<{ content: string; generated_at: string; mode: string }>(
         `/api/books/${bookId}/chapters/${chapterId}/explain?mode=${mode}`,
       ),
@@ -111,6 +143,14 @@ export const api = {
       req<{ cached_modes: Record<string, string | null> }>(
         `/api/books/${bookId}/chapters/${chapterId}/explain/modes`,
       ),
+    chat: (
+      bookId: number,
+      chapterId: number,
+      question: string,
+      explainContent: string,
+      history: Array<{ role: "user" | "assistant"; content: string }>,
+    ) =>
+      `/api/books/${bookId}/chapters/${chapterId}/explain/chat` as string,
   },
 
   map: {
@@ -194,6 +234,7 @@ export const api = {
 /**
  * POST a request and consume the SSE stream.
  * Calls onDelta for each text chunk; calls onDone when stream ends.
+ * Pass an AbortSignal to cancel the stream.
  */
 export async function streamPost(
   path: string,
@@ -201,12 +242,15 @@ export async function streamPost(
   onDelta: (text: string) => void,
   onDone: () => void,
   onError?: (err: Error) => void,
+  signal?: AbortSignal,
 ): Promise<void> {
   try {
     const res = await fetch(`${BASE}${path}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
+      credentials: "include",
+      signal,
     });
     if (!res.ok || !res.body) throw new Error(`Stream error ${res.status}`);
 
@@ -237,6 +281,8 @@ export async function streamPost(
     }
     onDone();
   } catch (err) {
+    // Ignore abort errors — caller intentionally cancelled the stream
+    if (err instanceof Error && err.name === "AbortError") return;
     onError?.(err instanceof Error ? err : new Error(String(err)));
   }
 }

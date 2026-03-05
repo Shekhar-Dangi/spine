@@ -11,9 +11,10 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from auth.deps import get_current_user
 from config import settings
 from db.database import get_db, AsyncSessionLocal
-from db.models import Book, BookFormat, Chapter, IngestStatus
+from db.models import Book, BookFormat, Chapter, IngestStatus, User
 from services import ingest as ingest_svc
 
 router = APIRouter(prefix="/api/books", tags=["books"])
@@ -57,8 +58,9 @@ class BookUpdateIn(BaseModel):
 
 
 class TocSuggestIn(BaseModel):
-    toc_pdf_page: int        # 1-indexed physical PDF page containing the TOC
-    page_offset: int = 0     # filler pages: pdf_page = book_page + page_offset
+    toc_pdf_page: int              # 1-indexed physical PDF page (start of TOC)
+    toc_pdf_page_end: int | None = None  # 1-indexed end page if TOC spans multiple pages
+    page_offset: int = 0           # filler pages: pdf_page = book_page + page_offset
 
 
 class ChapterUpdateIn(BaseModel):
@@ -75,6 +77,7 @@ async def upload_book(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Save file, create Book row, trigger background parse."""
     ext = Path(file.filename or "").suffix.lower()
@@ -94,6 +97,7 @@ async def upload_book(
         format=fmt,
         file_path=str(dest_path),
         ingest_status=IngestStatus.UPLOADED,
+        user_id=current_user.id,
     )
     db.add(book)
     await db.commit()
@@ -110,21 +114,39 @@ async def upload_book(
 
 
 @router.get("", response_model=list[BookOut])
-async def list_books(db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Book).order_by(Book.created_at.desc()))
+async def list_books(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    result = await db.execute(
+        select(Book)
+        .where(Book.user_id == current_user.id)
+        .order_by(Book.created_at.desc())
+    )
     return result.scalars().all()
 
 
 @router.get("/{book_id}", response_model=BookOut)
-async def get_book(book_id: int, db: AsyncSession = Depends(get_db)):
+async def get_book(
+    book_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     book = await db.get(Book, book_id)
-    if not book:
+    if not book or book.user_id != current_user.id:
         raise HTTPException(status_code=404, detail="Book not found.")
     return book
 
 
 @router.get("/{book_id}/chapters", response_model=list[dict])
-async def get_chapters(book_id: int, db: AsyncSession = Depends(get_db)):
+async def get_chapters(
+    book_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    book = await db.get(Book, book_id)
+    if not book or book.user_id != current_user.id:
+        raise HTTPException(status_code=404, detail="Book not found.")
     result = await db.execute(
         select(Chapter)
         .where(Chapter.book_id == book_id)
@@ -151,7 +173,11 @@ async def get_chapter_text(
     book_id: int,
     chapter_id: int,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
+    book = await db.get(Book, book_id)
+    if not book or book.user_id != current_user.id:
+        raise HTTPException(status_code=404, detail="Book not found.")
     chapter = await db.get(Chapter, chapter_id)
     if not chapter or chapter.book_id != book_id:
         raise HTTPException(status_code=404, detail="Chapter not found.")
@@ -171,10 +197,11 @@ async def confirm_toc(
     body: TocConfirmIn,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """User submits validated TOC → triggers chunk + embed in background."""
     book = await db.get(Book, book_id)
-    if not book:
+    if not book or book.user_id != current_user.id:
         raise HTTPException(status_code=404, detail="Book not found.")
     if book.ingest_status != IngestStatus.PENDING_TOC_REVIEW:
         raise HTTPException(
@@ -202,10 +229,11 @@ async def retry_embed(
     book_id: int,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Re-run the embedding step for a FAILED book that already has chunks in DB."""
     book = await db.get(Book, book_id)
-    if not book:
+    if not book or book.user_id != current_user.id:
         raise HTTPException(status_code=404, detail="Book not found.")
     if book.ingest_status not in (IngestStatus.FAILED,):
         raise HTTPException(
@@ -231,10 +259,11 @@ async def update_book_metadata(
     book_id: int,
     body: BookUpdateIn,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Edit book title and/or author."""
     book = await db.get(Book, book_id)
-    if not book:
+    if not book or book.user_id != current_user.id:
         raise HTTPException(status_code=404, detail="Book not found.")
     if body.title is not None:
         t = body.title.strip()
@@ -254,6 +283,7 @@ async def suggest_toc(
     book_id: int,
     body: TocSuggestIn,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """
     Extract text from a PDF TOC page and ask the LLM to parse it into chapters.
@@ -261,7 +291,7 @@ async def suggest_toc(
     and calls /toc/confirm to persist.
     """
     book = await db.get(Book, book_id)
-    if not book:
+    if not book or book.user_id != current_user.id:
         raise HTTPException(status_code=404, detail="Book not found.")
     if book.format != BookFormat.PDF:
         raise HTTPException(
@@ -274,11 +304,17 @@ async def suggest_toc(
         chapters = await _suggest(
             file_path=book.file_path,
             toc_pdf_page=body.toc_pdf_page,
+            toc_pdf_page_end=body.toc_pdf_page_end,
             page_offset=body.page_offset,
             db=db,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+    except Exception as exc:
+        # Covers AuthenticationError, connection errors, etc.
+        raise HTTPException(status_code=502, detail=f"LLM error: {exc}")
 
     return {"chapters": chapters}
 
@@ -289,8 +325,12 @@ async def update_chapter(
     chapter_id: int,
     body: ChapterUpdateIn,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Edit a chapter title (post-ingestion, title-only)."""
+    book = await db.get(Book, book_id)
+    if not book or book.user_id != current_user.id:
+        raise HTTPException(status_code=404, detail="Book not found.")
     chapter = await db.get(Chapter, chapter_id)
     if not chapter or chapter.book_id != book_id:
         raise HTTPException(status_code=404, detail="Chapter not found.")
@@ -317,6 +357,7 @@ async def reset_toc(
     book_id: int,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """
     Wipe all derived data (chunks, chapters, embeddings, explains, maps) and
@@ -324,7 +365,7 @@ async def reset_toc(
     Only allowed when the book is not currently parsing or ingesting.
     """
     book = await db.get(Book, book_id)
-    if not book:
+    if not book or book.user_id != current_user.id:
         raise HTTPException(status_code=404, detail="Book not found.")
     if book.ingest_status in (IngestStatus.PARSING, IngestStatus.INGESTING):
         raise HTTPException(
@@ -346,9 +387,13 @@ async def reset_toc(
 
 
 @router.delete("/{book_id}", response_model=dict)
-async def delete_book(book_id: int, db: AsyncSession = Depends(get_db)):
+async def delete_book(
+    book_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     book = await db.get(Book, book_id)
-    if not book:
+    if not book or book.user_id != current_user.id:
         raise HTTPException(status_code=404, detail="Book not found.")
     await ingest_svc.delete_book_artefacts(book_id, book.file_path, db)
     return {"deleted": book_id}

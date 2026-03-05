@@ -42,9 +42,22 @@ export default function UploadButton({ onUploaded }: Props) {
       <button
         onClick={() => inputRef.current?.click()}
         disabled={uploading}
-        className="px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-700 dark:hover:bg-amber-500 disabled:opacity-50 text-white text-sm font-medium transition-colors"
+        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-stone-900 dark:bg-stone-100 text-stone-50 dark:text-stone-900 text-xs font-medium hover:bg-stone-700 dark:hover:bg-stone-300 disabled:opacity-50 transition-colors whitespace-nowrap"
       >
-        {uploading ? "Uploading…" : "+ Upload Book"}
+        {uploading ? (
+          <>
+            <span className="w-3 h-3 border border-stone-400 border-t-transparent rounded-full animate-spin" />
+            Uploading…
+          </>
+        ) : (
+          <>
+            <svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+              <line x1="6" y1="1" x2="6" y2="11" />
+              <line x1="1" y1="6" x2="11" y2="6" />
+            </svg>
+            Add book
+          </>
+        )}
       </button>
       {error && <p className="text-xs text-red-500 dark:text-red-400">{error}</p>}
     </div>

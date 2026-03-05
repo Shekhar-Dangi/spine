@@ -198,24 +198,30 @@ function SuggestPanel({
   bookId: number;
   onSuggested: (chapters: TocChapter[]) => void;
 }) {
-  const [tocPage, setTocPage] = useState("");
+  const [tocPageStart, setTocPageStart] = useState("");
+  const [tocPageEnd, setTocPageEnd] = useState("");
   const [offset, setOffset] = useState("0");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const handleSuggest = async () => {
-    const pageNum = parseInt(tocPage, 10);
+    const startNum = parseInt(tocPageStart, 10);
+    const endNum = tocPageEnd ? parseInt(tocPageEnd, 10) : undefined;
     const offsetNum = parseInt(offset, 10) || 0;
-    if (!pageNum || pageNum < 1) {
-      setError("Enter a valid PDF page number (e.g. 5).");
+    if (!startNum || startNum < 1) {
+      setError("Enter a valid start page number.");
+      return;
+    }
+    if (endNum !== undefined && endNum < startNum) {
+      setError("End page must be ≥ start page.");
       return;
     }
     setLoading(true);
     setError(null);
     try {
-      const { chapters } = await api.books.suggestToc(bookId, pageNum, offsetNum);
+      const { chapters } = await api.books.suggestToc(bookId, startNum, offsetNum, endNum);
       if (chapters.length === 0) {
-        setError("LLM found no chapters on that page. Try a different page.");
+        setError("LLM found no chapters on those pages. Try different page numbers.");
         setLoading(false);
         return;
       }
@@ -242,22 +248,36 @@ function SuggestPanel({
   return (
     <div className="px-4 py-4 space-y-3">
       <p className="text-xs text-stone-500 dark:text-stone-400 leading-relaxed">
-        Enter the PDF page number that shows the table of contents. The{" "}
+        Enter the PDF page range that shows the table of contents. If the TOC fits on one page,
+        leave the end page blank. The{" "}
         <strong className="text-stone-600 dark:text-stone-300">page offset</strong> corrects for
-        front-matter pages — e.g. if chapter 1 is labeled "page 1" in the book but is actually on
-        PDF page 13, set offset to <code className="text-stone-600 dark:text-stone-300">12</code>.
+        front-matter — e.g. if chapter 1 is labeled "page 1" but is on PDF page 13, set offset to{" "}
+        <code className="text-stone-600 dark:text-stone-300">12</code>.
       </p>
       <div className="flex flex-wrap items-end gap-3">
         <div>
           <label className="text-xs text-stone-500 dark:text-stone-400 block mb-1">
-            TOC PDF page
+            TOC start page
           </label>
           <input
             type="number"
             min={1}
-            value={tocPage}
-            onChange={(e) => setTocPage(e.target.value)}
+            value={tocPageStart}
+            onChange={(e) => setTocPageStart(e.target.value)}
             placeholder="e.g. 5"
+            className={`w-24 ${inputClass}`}
+          />
+        </div>
+        <div>
+          <label className="text-xs text-stone-500 dark:text-stone-400 block mb-1">
+            End page <span className="opacity-50">(optional)</span>
+          </label>
+          <input
+            type="number"
+            min={1}
+            value={tocPageEnd}
+            onChange={(e) => setTocPageEnd(e.target.value)}
+            placeholder="e.g. 7"
             className={`w-24 ${inputClass}`}
           />
         </div>

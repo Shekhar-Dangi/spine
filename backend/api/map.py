@@ -7,8 +7,9 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
+from auth.deps import get_current_user
 from db.database import get_db, AsyncSessionLocal
-from db.models import Book, Chapter, ChapterMap, IngestStatus
+from db.models import Book, Chapter, ChapterMap, IngestStatus, User
 from services import map as map_svc
 
 router = APIRouter(prefix="/api/books", tags=["map"])
@@ -20,6 +21,7 @@ async def generate_map(
     chapter_id: int,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     book = await db.get(Book, book_id)
     if not book or book.ingest_status != IngestStatus.READY:
@@ -45,6 +47,7 @@ async def get_map(
     book_id: int,
     chapter_id: int,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     result = await db.execute(
         select(ChapterMap).where(

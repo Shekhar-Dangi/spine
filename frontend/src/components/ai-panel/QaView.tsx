@@ -14,6 +14,7 @@ export default function QaView({ bookId }: Props) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
   // Load persisted messages when chapter changes
   useEffect(() => {
@@ -46,11 +47,19 @@ export default function QaView({ bookId }: Props) {
     };
     setMessages((prev) => [...prev, tempUserMsg]);
 
+    abortRef.current?.abort();
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
+
     streamPost(
       `/api/books/${bookId}/qa`,
       { chapter_id: activeChapterId, selected_text: selectedText, question: q },
-      (delta) => setStreamingContent((prev) => (prev ?? "") + delta.replace(/\\n/g, "\n")),
+      (delta) => {
+        if (ctrl.signal.aborted) return;
+        setStreamingContent((prev) => (prev ?? "") + delta.replace(/\\n/g, "\n"));
+      },
       () => {
+        if (ctrl.signal.aborted) return;
         setStreamingContent(null);
         setLoading(false);
         setSelectedText("");
@@ -59,11 +68,19 @@ export default function QaView({ bookId }: Props) {
           .catch(() => {});
       },
       (err) => {
+        if (ctrl.signal.aborted) return;
         setError(err.message);
         setStreamingContent(null);
         setLoading(false);
       },
+      ctrl.signal,
     );
+  };
+
+  const handleStop = () => {
+    abortRef.current?.abort();
+    setStreamingContent(null);
+    setLoading(false);
   };
 
   return (
@@ -113,18 +130,27 @@ export default function QaView({ bookId }: Props) {
             type="text"
             value={question}
             onChange={(e) => setQuestion(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && handleAsk()}
+            onKeyDown={(e) => e.key === "Enter" && !loading && handleAsk()}
             placeholder={selectedText ? "Ask about the selection…" : "Ask about this chapter…"}
             disabled={!activeChapterId || loading}
             className="flex-1 bg-white dark:bg-stone-800 border border-stone-300 dark:border-stone-700 rounded-lg px-3 py-2 text-sm text-stone-900 dark:text-stone-100 placeholder-stone-400 dark:placeholder-stone-600 outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-600 dark:focus:border-amber-500 disabled:opacity-50 transition-colors"
           />
-          <button
-            onClick={handleAsk}
-            disabled={!question.trim() || !activeChapterId || loading}
-            className="px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-700 dark:hover:bg-amber-500 disabled:opacity-40 text-white text-xs font-medium transition-colors"
-          >
-            Ask
-          </button>
+          {loading ? (
+            <button
+              onClick={handleStop}
+              className="px-4 py-2 rounded-lg bg-red-100 hover:bg-red-200 dark:bg-red-950/40 text-red-600 dark:text-red-400 text-xs font-medium transition-colors"
+            >
+              Stop
+            </button>
+          ) : (
+            <button
+              onClick={handleAsk}
+              disabled={!question.trim() || !activeChapterId}
+              className="px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-700 dark:hover:bg-amber-500 disabled:opacity-40 text-white text-xs font-medium transition-colors"
+            >
+              Ask
+            </button>
+          )}
         </div>
       </div>
     </div>

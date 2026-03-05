@@ -6,9 +6,10 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
+from auth.deps import get_current_user
 from config import settings
 from db.database import get_db
-from db.models import ModelProfile, ProviderType, TaskProviderMapping, ROUTING_TASKS
+from db.models import ModelProfile, ProviderType, TaskProviderMapping, ROUTING_TASKS, User
 from providers.key_store import encrypt_key
 from providers.registry import build_provider
 
@@ -54,13 +55,17 @@ class ProfileOut(BaseModel):
 
 
 @router.get("/capabilities", response_model=dict)
-async def get_capabilities():
+async def get_capabilities(current_user: User = Depends(get_current_user)):
     """Returns which optional integrations are configured server-side."""
     return {"tavily_available": bool(settings.tavily_api_key)}
 
 
 @router.post("/profiles", response_model=ProfileOut)
-async def create_profile(body: ProfileCreateIn, db: AsyncSession = Depends(get_db)):
+async def create_profile(
+    body: ProfileCreateIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     profile = ModelProfile(
         name=body.name,
         provider_type=body.provider_type,
@@ -76,14 +81,20 @@ async def create_profile(body: ProfileCreateIn, db: AsyncSession = Depends(get_d
 
 
 @router.get("/profiles", response_model=list[ProfileOut])
-async def list_profiles(db: AsyncSession = Depends(get_db)):
+async def list_profiles(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     result = await db.execute(select(ModelProfile).order_by(ModelProfile.created_at))
     return [_profile_out(p) for p in result.scalars().all()]
 
 
 @router.patch("/profiles/{profile_id}", response_model=ProfileOut)
 async def update_profile(
-    profile_id: int, body: ProfileUpdateIn, db: AsyncSession = Depends(get_db)
+    profile_id: int,
+    body: ProfileUpdateIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     profile = await db.get(ModelProfile, profile_id)
     if not profile:
@@ -104,7 +115,11 @@ async def update_profile(
 
 
 @router.delete("/profiles/{profile_id}", response_model=dict)
-async def delete_profile(profile_id: int, db: AsyncSession = Depends(get_db)):
+async def delete_profile(
+    profile_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     profile = await db.get(ModelProfile, profile_id)
     if not profile:
         raise HTTPException(status_code=404, detail="Profile not found.")
@@ -114,7 +129,11 @@ async def delete_profile(profile_id: int, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/profiles/{profile_id}/test", response_model=dict)
-async def test_profile(profile_id: int, db: AsyncSession = Depends(get_db)):
+async def test_profile(
+    profile_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     profile = await db.get(ModelProfile, profile_id)
     if not profile:
         raise HTTPException(status_code=404, detail="Profile not found.")
@@ -154,7 +173,10 @@ class TaskMappingIn(BaseModel):
 
 
 @router.get("/task-mapping", response_model=dict)
-async def get_task_mapping(db: AsyncSession = Depends(get_db)):
+async def get_task_mapping(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """Return the current task→profile_id mapping for all routing tasks."""
     result = await db.execute(select(TaskProviderMapping))
     rows = {r.task_name: r.profile_id for r in result.scalars().all()}
@@ -162,7 +184,11 @@ async def get_task_mapping(db: AsyncSession = Depends(get_db)):
 
 
 @router.put("/task-mapping", response_model=dict)
-async def set_task_mapping(body: TaskMappingIn, db: AsyncSession = Depends(get_db)):
+async def set_task_mapping(
+    body: TaskMappingIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """
     Upsert task→profile_id mappings.
     Pass null for a task to clear its mapping (will fall back to active profile).

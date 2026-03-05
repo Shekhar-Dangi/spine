@@ -38,32 +38,36 @@ export default function BookLibrary() {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-8">
-        <h2 className="font-serif italic text-lg text-stone-800 dark:text-stone-200">
+      <div className="flex items-center justify-between mb-6">
+        <h2 className="font-serif italic text-stone-600 dark:text-stone-400 text-sm tracking-wide">
           Your Library
         </h2>
         <UploadButton onUploaded={fetchBooks} />
       </div>
 
       {loading && (
-        <p className="text-sm text-stone-400 dark:text-stone-600">Loading…</p>
+        <p className="text-xs text-stone-400 dark:text-stone-600 py-2">Loading…</p>
       )}
       {error && (
-        <p className="text-sm text-red-500 dark:text-red-400">{error}</p>
+        <p className="text-xs text-red-500 dark:text-red-400 py-2">{error}</p>
       )}
 
       {!loading && books.length === 0 && (
-        <div className="text-center py-24 border border-dashed border-stone-300 dark:border-stone-700 rounded-2xl">
-          <p className="text-sm text-stone-400 dark:text-stone-600">
-            No books yet.{" "}
-            <span className="text-stone-500 dark:text-stone-500">
-              Upload a PDF or EPUB to get started.
-            </span>
+        <div className="flex flex-col items-center justify-center py-20 text-center">
+          <div className="w-10 h-10 mb-4 rounded-xl border border-stone-200 dark:border-stone-800 flex items-center justify-center">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-stone-400 dark:text-stone-600">
+              <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+              <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+            </svg>
+          </div>
+          <p className="text-sm text-stone-500 dark:text-stone-500 font-medium">No books yet</p>
+          <p className="text-xs text-stone-400 dark:text-stone-600 mt-1">
+            Upload a PDF or EPUB to get started
           </p>
         </div>
       )}
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
         {books.map((book) => (
           <BookCard key={book.id} book={book} onChanged={fetchBooks} />
         ))}

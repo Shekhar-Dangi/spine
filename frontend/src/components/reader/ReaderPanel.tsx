@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState, useCallback } from "react";
+import Link from "next/link";
 import { api } from "@/lib/api";
 import { useBookReader } from "@/contexts/BookReaderContext";
 
@@ -44,7 +45,21 @@ export default function ReaderPanel({ bookId, onCollapse }: Props) {
   return (
     <div className="h-full flex flex-col bg-stone-50 dark:bg-stone-950">
       {/* Chapter selector */}
-      <div className="shrink-0 flex items-center border-b border-stone-200 dark:border-stone-800 px-5 py-3 bg-white dark:bg-stone-900/50 gap-2">
+      <div className="shrink-0 flex items-center border-b border-stone-200 dark:border-stone-800 px-3 sm:px-5 py-3 bg-white dark:bg-stone-900/50 gap-2">
+        {/* Home link — desktop only (mobile has top bar) */}
+        <Link
+          href="/"
+          title="Back to Library"
+          className="hidden md:flex shrink-0 items-center gap-1 text-stone-400 hover:text-stone-700 dark:text-stone-500 dark:hover:text-stone-300 transition-colors pr-1"
+        >
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" className="w-3.5 h-3.5">
+            <path d="M1 7L8 1l7 6" strokeLinecap="round" strokeLinejoin="round" />
+            <path d="M2 7v7a1 1 0 0 0 1 1h3v-4h4v4h3a1 1 0 0 0 1-1V7" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </Link>
+        {onCollapse && (
+          <div className="hidden md:block h-4 w-px bg-stone-200 dark:bg-stone-700 shrink-0" />
+        )}
         <select
           value={activeChapterId ?? ""}
           onChange={(e) => setActiveChapterId(e.target.value ? Number(e.target.value) : null)}
@@ -63,17 +78,7 @@ export default function ReaderPanel({ bookId, onCollapse }: Props) {
             title="Collapse reader"
             className="shrink-0 p-1.5 rounded hover:bg-stone-100 dark:hover:bg-stone-800 text-stone-400 hover:text-stone-700 dark:text-stone-500 dark:hover:text-stone-300 transition-colors"
           >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <polyline points="15 18 9 12 15 6" />
             </svg>
           </button>
@@ -82,7 +87,7 @@ export default function ReaderPanel({ bookId, onCollapse }: Props) {
 
       {/* Chapter text */}
       <div
-        className="flex-1 overflow-y-auto px-10 py-8 text-[16px] leading-[1.85] text-stone-700 dark:text-stone-300 select-text"
+        className="flex-1 overflow-y-auto px-5 sm:px-10 py-6 sm:py-8 text-[15px] sm:text-[16px] leading-[1.85] text-stone-700 dark:text-stone-300 select-text"
         onMouseUp={handleMouseUp}
       >
         {!activeChapterId && (
@@ -98,7 +103,7 @@ export default function ReaderPanel({ bookId, onCollapse }: Props) {
         )}
         {chapterText && !loadingText && (
           <article className="max-w-[65ch]">
-            <h2 className="font-serif text-2xl text-stone-900 dark:text-stone-100 mb-8 leading-tight">
+            <h2 className="font-serif text-xl sm:text-2xl text-stone-900 dark:text-stone-100 mb-6 sm:mb-8 leading-tight">
               {activeChapter?.title}
             </h2>
             {chapterText.split("\n\n").map((para, i) => (
@@ -110,8 +115,8 @@ export default function ReaderPanel({ bookId, onCollapse }: Props) {
         )}
       </div>
 
-      {/* Selection hint */}
-      <div className="shrink-0 border-t border-stone-200 dark:border-stone-800 px-5 py-2 text-xs text-stone-400 dark:text-stone-600 bg-white dark:bg-stone-900/30">
+      {/* Selection hint — hidden on mobile to save space */}
+      <div className="hidden sm:block shrink-0 border-t border-stone-200 dark:border-stone-800 px-5 py-2 text-xs text-stone-400 dark:text-stone-600 bg-white dark:bg-stone-900/30">
         Highlight text and switch to Q&amp;A to ask a grounded question.
       </div>
     </div>

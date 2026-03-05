@@ -6,8 +6,9 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from auth.deps import get_current_user
 from db.database import AsyncSessionLocal, get_db
-from db.models import Book, Dossier, DossierSection, IngestStatus
+from db.models import Book, Dossier, DossierSection, IngestStatus, User
 from services import dossier as dossier_svc
 
 router = APIRouter(prefix="/api/books", tags=["dossier"])
@@ -23,9 +24,10 @@ async def generate_dossier(
     body: GenerateRequest,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     book = await db.get(Book, book_id)
-    if not book:
+    if not book or book.user_id != current_user.id:
         raise HTTPException(status_code=404, detail="Book not found.")
     if book.ingest_status != IngestStatus.READY:
         raise HTTPException(status_code=409, detail="Book is not ready yet.")
@@ -58,7 +60,11 @@ async def generate_dossier(
 
 
 @router.get("/{book_id}/dossier", response_model=dict)
-async def get_dossier(book_id: int, db: AsyncSession = Depends(get_db)):
+async def get_dossier(
+    book_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     result = await db.execute(select(Dossier).where(Dossier.book_id == book_id))
     dossier = result.scalar_one_or_none()
     if not dossier:

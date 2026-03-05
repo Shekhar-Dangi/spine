@@ -6,8 +6,9 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from config import settings
 from db.database import init_db
-from api import books, dossier, explain, qa, map, providers
+from api import books, dossier, explain, qa, map, providers, auth
 
 
 @asynccontextmanager
@@ -20,11 +21,13 @@ app = FastAPI(title="Spine API", version="0.1.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=settings.cors_origins.split(","),
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+app.include_router(auth.router)
 app.include_router(books.router)
 app.include_router(dossier.router)
 app.include_router(explain.router)

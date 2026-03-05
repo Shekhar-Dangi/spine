@@ -68,6 +68,44 @@ class ExplainMode(str, enum.Enum):
 
 
 # ---------------------------------------------------------------------------
+# User + InviteCode
+# ---------------------------------------------------------------------------
+
+
+class User(Base):
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    username: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    email: Mapped[str] = mapped_column(String(256), nullable=False, unique=True)
+    password_hash: Mapped[str] = mapped_column(String(256), nullable=False)
+    is_admin: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+    books: Mapped[list["Book"]] = relationship(back_populates="user")
+    invite_codes_created: Mapped[list["InviteCode"]] = relationship(
+        foreign_keys="InviteCode.created_by_id", back_populates="created_by"
+    )
+
+
+class InviteCode(Base):
+    __tablename__ = "invite_codes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    code: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    created_by_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    used_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+    created_by: Mapped["User"] = relationship(
+        foreign_keys=[created_by_id], back_populates="invite_codes_created"
+    )
+    used_by: Mapped["User | None"] = relationship(foreign_keys=[used_by_id])
+
+
+# ---------------------------------------------------------------------------
 # Book
 # ---------------------------------------------------------------------------
 
@@ -89,12 +127,16 @@ class Book(Base):
     ingest_error: Mapped[str | None] = mapped_column(Text)
     ingest_quality_json: Mapped[str | None] = mapped_column(
         Text)  # JSON warnings
+    user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_now)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_now, onupdate=_now
     )
 
+    user: Mapped["User | None"] = relationship(back_populates="books")
     chapters: Mapped[list["Chapter"]] = relationship(
         back_populates="book", cascade="all, delete-orphan"
     )

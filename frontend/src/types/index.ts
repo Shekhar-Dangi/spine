@@ -4,12 +4,29 @@
 
 export type BookFormat = "pdf" | "epub";
 
-export type ExplainMode =
-  | "story"
-  | "first_principles"
-  | "systems"
-  | "derivation"
-  | "synthesis";
+/** Mode key — built-in or user-defined (any string ≤ 32 chars). */
+export type ExplainMode = string;
+
+export const BUILTIN_MODE_KEYS = [
+  "story",
+  "first_principles",
+  "systems",
+  "derivation",
+  "synthesis",
+] as const;
+
+export interface ExplainTemplate {
+  id: string;
+  name: string;
+  /** Mode key sent to backend — max 32 chars, no spaces. */
+  key: string;
+  /** Full prompt template; uses {book_title}, {author}, {chapter_num}, {chapter_title}, {chapter_text}. */
+  template: string;
+  /** True if this is one of the 5 original built-in modes. */
+  isBuiltin: boolean;
+  /** True if the user has edited the template text of a built-in mode. */
+  isModified: boolean;
+}
 
 export type IngestStatus =
   | "uploaded"
@@ -108,6 +125,23 @@ export interface ConversationMessage {
 export interface ConversationResponse {
   conversation_id: number | null;
   messages: ConversationMessage[];
+}
+
+export interface UserOut {
+  id: number;
+  username: string;
+  email: string;
+  is_admin: boolean;
+  created_at: string;
+}
+
+export interface InviteOut {
+  id: number;
+  code: string;
+  created_at: string;
+  expires_at: string | null;
+  used_by_id: number | null;
+  used_by_username: string | null;
 }
 
 /** A suggested chapter entry returned by POST /toc/suggest. */

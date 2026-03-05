@@ -1,3 +1,4 @@
+import secrets
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase
@@ -20,14 +21,16 @@ async def get_db() -> AsyncSession:
 async def init_db() -> None:
     from db import models  # noqa: F401 — register all models
     async with engine.begin() as conn:
+        await conn.execute(text("PRAGMA journal_mode=WAL"))
+        await conn.execute(text("PRAGMA synchronous=NORMAL"))
         await conn.run_sync(Base.metadata.create_all)
         await _migrate(conn)
+    await _seed_admin()
 
 
 async def _migrate(conn) -> None:
     """
-    One-time migration: ModelProfile model_map_json (old) → model (new).
-    Each step is idempotent — safe to run on every startup.
+    One-time migrations — each step is idempotent, safe to run every startup.
     """
     # 1. Add the new column if it doesn't exist yet (no-op on fresh DBs).
     try:
@@ -38,7 +41,6 @@ async def _migrate(conn) -> None:
         pass  # column already exists
 
     # 2. Back-fill from the old JSON for any rows where model is still NULL.
-    #    Skipped silently if model_map_json column no longer exists.
     try:
         await conn.execute(text("""
             UPDATE model_profiles
@@ -51,17 +53,15 @@ async def _migrate(conn) -> None:
             WHERE (model IS NULL OR model = '') AND model_map_json IS NOT NULL
         """))
     except Exception:
-        pass  # model_map_json already gone (fresh DB or migration already ran)
+        pass
 
     # 3. Drop the old column so its NOT NULL constraint no longer blocks INSERTs.
-    #    SQLite 3.35+ supports DROP COLUMN. Fails silently on fresh DBs where
-    #    the column was never created.
     try:
         await conn.execute(text(
             "ALTER TABLE model_profiles DROP COLUMN model_map_json"
         ))
     except Exception:
-        pass  # column already dropped, or fresh DB that never had it
+        pass
 
     # 4. Add chapter_id to messages (Q&A per-chapter tagging).
     try:
@@ -69,11 +69,9 @@ async def _migrate(conn) -> None:
             "ALTER TABLE messages ADD COLUMN chapter_id INTEGER REFERENCES chapters(id)"
         ))
     except Exception:
-        pass  # column already exists
+        pass
 
     # 5. Add mode column to chapter_explains (multi-explain mode support).
-    #    If missing, rebuild the table: rename old → _old, create new with mode,
-    #    copy rows with mode='story', drop the backup.
     result = await conn.execute(text("PRAGMA table_info(chapter_explains)"))
     columns = {row[1] for row in result.fetchall()}
     if "mode" not in columns:
@@ -103,3 +101,52 @@ async def _migrate(conn) -> None:
         """))
     except Exception:
         pass
+
+    # 7. Add user_id column to books (for per-user isolation).
+    try:
+        await conn.execute(text(
+            "ALTER TABLE books ADD COLUMN user_id INTEGER REFERENCES users(id)"
+        ))
+    except Exception:
+        pass  # column already exists
+
+
+async def _seed_admin() -> None:
+    """
+    On first startup: create admin user and assign existing books to them.
+    Prints a temporary password to the console.
+    """
+    import bcrypt
+    from db.models import User
+    from sqlalchemy import select, text as sa_text
+
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(select(User).limit(1))
+        if result.scalar_one_or_none():
+            return  # users already exist, skip seeding
+
+        temp_password = secrets.token_urlsafe(12)
+        password_hash = bcrypt.hashpw(temp_password.encode(), bcrypt.gensalt()).decode()
+        admin = User(
+            username="shekhardangi",
+            email="dangishekhar3109@gmail.com",
+            password_hash=password_hash,
+            is_admin=True,
+        )
+        db.add(admin)
+        await db.commit()
+        await db.refresh(admin)
+
+        # Assign all existing books to admin
+        await db.execute(
+            sa_text(f"UPDATE books SET user_id = {admin.id} WHERE user_id IS NULL")
+        )
+        await db.commit()
+
+        print("\n" + "=" * 60)
+        print("  SPINE — Admin account created")
+        print(f"  Username : shekhardangi")
+        print(f"  Email    : dangishekhar3109@gmail.com")
+        print(f"  Password : {temp_password}")
+        print("  Change this password after first login!")
+        print("=" * 60 + "\n")

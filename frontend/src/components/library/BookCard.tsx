@@ -4,13 +4,13 @@ import Link from "next/link";
 import { api } from "@/lib/api";
 import type { Book } from "@/types";
 
-const STATUS_CONFIG: Record<string, { label: string; dot: string; text: string }> = {
-  uploaded:           { label: "Uploaded",   dot: "bg-stone-400",   text: "text-stone-500 dark:text-stone-400" },
-  parsing:            { label: "Parsing…",   dot: "bg-amber-500 animate-pulse", text: "text-amber-600 dark:text-amber-400" },
-  pending_toc_review: { label: "Review TOC", dot: "bg-sky-500",     text: "text-sky-600 dark:text-sky-400" },
-  ingesting:          { label: "Indexing…",  dot: "bg-amber-500 animate-pulse", text: "text-amber-600 dark:text-amber-400" },
-  ready:              { label: "Ready",       dot: "bg-emerald-500", text: "text-emerald-600 dark:text-emerald-400" },
-  failed:             { label: "Failed",      dot: "bg-red-500",     text: "text-red-500 dark:text-red-400" },
+const STATUS_CONFIG: Record<string, { label: string; dot: string; text: string; border: string }> = {
+  uploaded:           { label: "Uploaded",    dot: "bg-stone-400",               text: "text-stone-500 dark:text-stone-400",     border: "border-l-stone-300 dark:border-l-stone-700" },
+  parsing:            { label: "Parsing…",    dot: "bg-amber-400 animate-pulse", text: "text-amber-600 dark:text-amber-400",     border: "border-l-amber-400 dark:border-l-amber-600" },
+  pending_toc_review: { label: "Review TOC",  dot: "bg-sky-500",                 text: "text-sky-600 dark:text-sky-400",          border: "border-l-sky-400 dark:border-l-sky-500" },
+  ingesting:          { label: "Indexing…",   dot: "bg-amber-400 animate-pulse", text: "text-amber-600 dark:text-amber-400",     border: "border-l-amber-400 dark:border-l-amber-600" },
+  ready:              { label: "Ready",        dot: "bg-emerald-500",             text: "text-emerald-600 dark:text-emerald-400", border: "border-l-emerald-500 dark:border-l-emerald-600" },
+  failed:             { label: "Failed",       dot: "bg-red-500",                 text: "text-red-500 dark:text-red-400",          border: "border-l-red-400 dark:border-l-red-600" },
 };
 
 interface Props {
@@ -23,7 +23,9 @@ export default function BookCard({ book, onChanged }: Props) {
     label: book.ingest_status,
     dot: "bg-stone-400",
     text: "text-stone-500",
+    border: "border-l-stone-300 dark:border-l-stone-700",
   };
+
   const [deleting, setDeleting] = useState(false);
   const [retrying, setRetrying] = useState(false);
   const [resettingToc, setResettingToc] = useState(false);
@@ -89,63 +91,74 @@ export default function BookCard({ book, onChanged }: Props) {
 
   const inner = (
     <div
-      className={`group relative rounded-xl border bg-white dark:bg-stone-900 p-5 h-full transition-colors
+      className={`group relative flex flex-col rounded-lg border-l-2 border border-stone-100 dark:border-stone-800/60 bg-white dark:bg-stone-900 px-4 py-3.5 h-full transition-all
+        ${status.border}
         ${cardHref
-          ? "border-stone-200 dark:border-stone-800 hover:border-amber-400 dark:hover:border-amber-600 cursor-pointer shadow-sm hover:shadow-md"
-          : "border-stone-200 dark:border-stone-800 cursor-default shadow-sm"
+          ? "hover:border-stone-200 dark:hover:border-stone-700 hover:shadow-sm"
+          : ""
         }`}
     >
       {/* Action buttons — top-right, revealed on hover */}
-      <div className="absolute top-3 right-3 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+      <div className="absolute top-2.5 right-2.5 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
         <button
           onClick={handleEditClick}
           title="Edit metadata"
-          className="w-7 h-7 flex items-center justify-center text-stone-400 hover:text-amber-600 dark:hover:text-amber-400 rounded-md hover:bg-stone-100 dark:hover:bg-stone-800 transition-colors text-sm"
+          className="w-6 h-6 flex items-center justify-center text-stone-400 hover:text-stone-700 dark:hover:text-stone-200 rounded hover:bg-stone-100 dark:hover:bg-stone-800 transition-colors"
           aria-label="Edit book metadata"
         >
-          ✎
+          <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M11.5 2.5a1.5 1.5 0 0 1 2.1 2.1L5 13.2l-3 .8.8-3 8.7-8.5z"/>
+          </svg>
         </button>
         {(book.ingest_status === "ready" || book.ingest_status === "failed") && (
           <button
             onClick={handleResetToc}
             disabled={resettingToc}
             title="Reset TOC & re-parse"
-            className="w-7 h-7 flex items-center justify-center text-stone-400 hover:text-amber-600 dark:hover:text-amber-400 rounded-md hover:bg-stone-100 dark:hover:bg-stone-800 transition-colors text-sm disabled:opacity-50"
+            className="w-6 h-6 flex items-center justify-center text-stone-400 hover:text-stone-700 dark:hover:text-stone-200 rounded hover:bg-stone-100 dark:hover:bg-stone-800 transition-colors disabled:opacity-40"
             aria-label="Reset TOC"
           >
-            {resettingToc ? "…" : "↺"}
+            <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M2 8a6 6 0 1 1 1.5 4"/><path d="M2 12V8h4"/>
+            </svg>
           </button>
         )}
         <button
           onClick={handleDelete}
           disabled={deleting}
           title="Delete book"
-          className="w-7 h-7 flex items-center justify-center text-stone-400 hover:text-red-500 dark:hover:text-red-400 rounded-md hover:bg-stone-100 dark:hover:bg-stone-800 transition-colors text-xs disabled:opacity-50"
+          className="w-6 h-6 flex items-center justify-center text-stone-400 hover:text-red-500 dark:hover:text-red-400 rounded hover:bg-stone-100 dark:hover:bg-stone-800 transition-colors disabled:opacity-40"
           aria-label="Delete book"
         >
-          {deleting ? "…" : "✕"}
+          <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+            <line x1="2" y1="2" x2="14" y2="14"/><line x1="14" y1="2" x2="2" y2="14"/>
+          </svg>
         </button>
       </div>
 
-      <p className="font-medium text-stone-900 dark:text-stone-100 truncate pr-14 leading-snug">
-        {book.title}
-      </p>
-      {book.author && (
-        <p className="text-xs text-stone-400 dark:text-stone-500 mt-0.5 truncate">
-          {book.author}
+      {/* Title + author */}
+      <div className="flex-1 min-w-0 pr-16">
+        <p className="text-sm font-medium text-stone-900 dark:text-stone-100 leading-snug line-clamp-2">
+          {book.title}
         </p>
-      )}
+        {book.author && (
+          <p className="text-xs text-stone-400 dark:text-stone-500 mt-0.5 truncate">
+            {book.author}
+          </p>
+        )}
+      </div>
 
-      <div className="flex items-center gap-2 mt-4 pt-3 border-t border-stone-100 dark:border-stone-800">
-        <span className="text-[10px] uppercase tracking-widest text-stone-400 dark:text-stone-600 font-mono">
+      {/* Footer */}
+      <div className="flex items-center gap-2 mt-3 pt-2.5 border-t border-stone-100 dark:border-stone-800">
+        <span className="text-[10px] uppercase tracking-widest text-stone-300 dark:text-stone-700 font-mono">
           {book.format}
         </span>
         {book.page_count != null && (
-          <span className="text-[10px] text-stone-400 dark:text-stone-600">
+          <span className="text-[10px] text-stone-300 dark:text-stone-700">
             {book.page_count}p
           </span>
         )}
-        <div className="ml-auto flex items-center gap-1.5">
+        <div className="ml-auto flex items-center gap-1">
           <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${status.dot}`} />
           <span className={`text-xs font-medium ${status.text}`}>
             {status.label}
@@ -154,22 +167,22 @@ export default function BookCard({ book, onChanged }: Props) {
       </div>
 
       {book.ingest_status === "failed" && (
-        <div className="mt-3 pt-3 border-t border-stone-100 dark:border-stone-800 flex items-start justify-between gap-2">
-          <p className="text-xs text-red-500 dark:text-red-400 leading-4 flex-1">
+        <div className="mt-2.5 pt-2.5 border-t border-stone-100 dark:border-stone-800 flex items-start justify-between gap-2">
+          <p className="text-xs text-red-500 dark:text-red-400 leading-4 flex-1 line-clamp-2">
             {book.ingest_error ?? "Unknown error"}
           </p>
           <button
             onClick={handleRetry}
             disabled={retrying}
-            className="shrink-0 text-xs text-amber-600 dark:text-amber-400 hover:text-amber-700 dark:hover:text-amber-300 underline disabled:opacity-50 transition-colors"
+            className="shrink-0 text-xs text-stone-500 dark:text-stone-400 hover:text-stone-800 dark:hover:text-stone-200 underline disabled:opacity-50 transition-colors"
           >
-            {retrying ? "Retrying…" : "Retry embed"}
+            {retrying ? "Retrying…" : "Retry"}
           </button>
         </div>
       )}
 
       {actionError && (
-        <p className="text-xs text-red-500 dark:text-red-400 mt-2">{actionError}</p>
+        <p className="text-xs text-red-500 dark:text-red-400 mt-2 line-clamp-2">{actionError}</p>
       )}
     </div>
   );
@@ -199,7 +212,7 @@ export default function BookCard({ book, onChanged }: Props) {
 }
 
 // ---------------------------------------------------------------------------
-// Inline metadata edit modal
+// Edit modal
 // ---------------------------------------------------------------------------
 
 function EditMetaModal({
@@ -218,17 +231,11 @@ function EditMetaModal({
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!title.trim()) {
-      setError("Title cannot be empty.");
-      return;
-    }
+    if (!title.trim()) { setError("Title cannot be empty."); return; }
     setSaving(true);
     setError(null);
     try {
-      await api.books.update(book.id, {
-        title: title.trim(),
-        author: author.trim() || undefined,
-      });
+      await api.books.update(book.id, { title: title.trim(), author: author.trim() || undefined });
       onSaved();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to save.");
@@ -238,54 +245,53 @@ function EditMetaModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 backdrop-blur-sm p-4"
       onClick={onClose}
     >
       <form
-        className="bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-700 rounded-xl p-6 w-full max-w-sm space-y-4 shadow-xl"
+        className="bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-700 rounded-xl p-5 w-full max-w-sm space-y-4 shadow-xl"
         onClick={(e) => e.stopPropagation()}
         onSubmit={handleSave}
       >
-        <h3 className="text-sm font-semibold text-stone-800 dark:text-stone-200">
-          Edit Book Metadata
-        </h3>
+        <h3 className="text-sm font-medium text-stone-800 dark:text-stone-200">Edit book</h3>
 
-        <div>
-          <label className="text-xs text-stone-500 dark:text-stone-400 block mb-1.5">Title</label>
-          <input
-            type="text"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            className="w-full bg-stone-50 dark:bg-stone-800 border border-stone-300 dark:border-stone-700 rounded-lg px-3 py-2 text-sm text-stone-900 dark:text-stone-100 outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-600 dark:focus:border-amber-500 transition-colors"
-            autoFocus
-          />
-        </div>
-
-        <div>
-          <label className="text-xs text-stone-500 dark:text-stone-400 block mb-1.5">Author</label>
-          <input
-            type="text"
-            value={author}
-            onChange={(e) => setAuthor(e.target.value)}
-            placeholder="Optional"
-            className="w-full bg-stone-50 dark:bg-stone-800 border border-stone-300 dark:border-stone-700 rounded-lg px-3 py-2 text-sm text-stone-900 dark:text-stone-100 outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-600 dark:focus:border-amber-500 transition-colors"
-          />
+        <div className="space-y-3">
+          <div>
+            <label className="text-xs text-stone-500 dark:text-stone-400 block mb-1">Title</label>
+            <input
+              type="text"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              className="w-full bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 rounded-lg px-3 py-2 text-sm text-stone-900 dark:text-stone-100 outline-none focus:ring-2 focus:ring-stone-300 dark:focus:ring-stone-600 transition-colors"
+              autoFocus
+            />
+          </div>
+          <div>
+            <label className="text-xs text-stone-500 dark:text-stone-400 block mb-1">Author</label>
+            <input
+              type="text"
+              value={author}
+              onChange={(e) => setAuthor(e.target.value)}
+              placeholder="Optional"
+              className="w-full bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 rounded-lg px-3 py-2 text-sm text-stone-900 dark:text-stone-100 outline-none focus:ring-2 focus:ring-stone-300 dark:focus:ring-stone-600 transition-colors"
+            />
+          </div>
         </div>
 
         {error && <p className="text-xs text-red-500 dark:text-red-400">{error}</p>}
 
-        <div className="flex gap-2 pt-1">
+        <div className="flex gap-2">
           <button
             type="submit"
             disabled={saving}
-            className="flex-1 py-2 rounded-lg bg-amber-600 hover:bg-amber-700 dark:hover:bg-amber-500 disabled:opacity-50 text-white text-sm font-medium transition-colors"
+            className="flex-1 py-2 rounded-lg bg-stone-900 dark:bg-stone-100 text-stone-50 dark:text-stone-900 text-sm font-medium hover:bg-stone-700 dark:hover:bg-stone-300 disabled:opacity-50 transition-colors"
           >
             {saving ? "Saving…" : "Save"}
           </button>
           <button
             type="button"
             onClick={onClose}
-            className="px-4 py-2 rounded-lg bg-stone-100 hover:bg-stone-200 dark:bg-stone-800 dark:hover:bg-stone-700 text-stone-700 dark:text-stone-300 text-sm font-medium transition-colors"
+            className="px-4 py-2 rounded-lg bg-stone-100 dark:bg-stone-800 text-stone-600 dark:text-stone-400 text-sm hover:bg-stone-200 dark:hover:bg-stone-700 transition-colors"
           >
             Cancel
           </button>
