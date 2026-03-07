@@ -33,7 +33,7 @@ async def generate_dossier(
         raise HTTPException(status_code=409, detail="Book is not ready yet.")
 
     from providers.registry import get_provider_for_task
-    provider = await get_provider_for_task("dossier", db)
+    provider = await get_provider_for_task("dossier", db, current_user.id)
 
     # Create (or reset) the Dossier row so GET /dossier returns "generating" state
     result = await db.execute(select(Dossier).where(Dossier.book_id == book_id))

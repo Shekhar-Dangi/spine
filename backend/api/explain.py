@@ -13,7 +13,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from auth.deps import get_current_user
 from db.database import get_db
-from db.models import Book, Chapter, ChapterExplain, IngestStatus, User
+from db.models import (
+    Book, Chapter, ChapterExplain, ExplainConversation, ExplainMessage,
+    IngestStatus, MessageRole, User,
+)
 from services import explain as explain_svc
 
 router = APIRouter(prefix="/api/books", tags=["explain"])
@@ -36,7 +39,6 @@ class ExplainChatMessage(BaseModel):
 class ExplainChatRequest(BaseModel):
     question: str
     explain_content: str
-    history: list[ExplainChatMessage] = []
 
 
 # ---------------------------------------------------------------------------
@@ -118,7 +120,7 @@ async def explain_chapter(
         raise HTTPException(status_code=400, detail="Mode key must be 32 characters or fewer.")
 
     from providers.registry import get_provider_for_task
-    provider = await get_provider_for_task("explain", db)
+    provider = await get_provider_for_task("explain", db, current_user.id)
 
     async def event_stream():
         try:
@@ -137,15 +139,88 @@ async def explain_chapter(
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
+async def _get_or_create_explain_conv(
+    book_id: int, chapter_id: int, mode: str, db: AsyncSession
+) -> ExplainConversation:
+    result = await db.execute(
+        select(ExplainConversation).where(
+            ExplainConversation.chapter_id == chapter_id,
+            ExplainConversation.mode == mode,
+        )
+    )
+    conv = result.scalar_one_or_none()
+    if not conv:
+        conv = ExplainConversation(book_id=book_id, chapter_id=chapter_id, mode=mode)
+        db.add(conv)
+        await db.commit()
+        await db.refresh(conv)
+    return conv
+
+
+@router.get("/{book_id}/chapters/{chapter_id}/explain/chat")
+async def get_explain_chat(
+    book_id: int,
+    chapter_id: int,
+    mode: str = Query("story"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Return persisted chat history for a chapter + explain mode."""
+    result = await db.execute(
+        select(ExplainConversation).where(
+            ExplainConversation.chapter_id == chapter_id,
+            ExplainConversation.mode == mode,
+        )
+    )
+    conv = result.scalar_one_or_none()
+    if not conv:
+        return {"messages": []}
+    msg_result = await db.execute(
+        select(ExplainMessage)
+        .where(ExplainMessage.conversation_id == conv.id)
+        .order_by(ExplainMessage.id)
+    )
+    messages = msg_result.scalars().all()
+    return {
+        "messages": [
+            {"id": m.id, "role": m.role.value, "content": m.content, "created_at": m.created_at.isoformat()}
+            for m in messages
+        ]
+    }
+
+
+@router.delete("/{book_id}/chapters/{chapter_id}/explain/chat")
+async def clear_explain_chat(
+    book_id: int,
+    chapter_id: int,
+    mode: str = Query("story"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Delete all chat messages for a chapter + explain mode."""
+    result = await db.execute(
+        select(ExplainConversation).where(
+            ExplainConversation.chapter_id == chapter_id,
+            ExplainConversation.mode == mode,
+        )
+    )
+    conv = result.scalar_one_or_none()
+    if conv:
+        await db.delete(conv)
+        await db.commit()
+    return {"ok": True}
+
+
 @router.post("/{book_id}/chapters/{chapter_id}/explain/chat")
 async def explain_chat(
     book_id: int,
     chapter_id: int,
-    body: ExplainChatRequest,
+    mode: str = Query("story"),
+    body: ExplainChatRequest = Body(...),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Stream a chat response grounded in the chapter explanation content."""
+    """Stream a chat response grounded in the chapter explanation content. Persists to DB."""
     book = await db.get(Book, book_id)
     if not book or book.ingest_status != IngestStatus.READY:
         raise HTTPException(status_code=409, detail="Book is not ready.")
@@ -158,20 +233,55 @@ async def explain_chat(
         raise HTTPException(status_code=422, detail="Question cannot be empty.")
 
     from providers.registry import get_provider_for_task
-    provider = await get_provider_for_task("explain", db)
-
-    history_dicts = [{"role": m.role, "content": m.content} for m in body.history]
+    provider = await get_provider_for_task("explain", db, current_user.id)
 
     async def event_stream():
+        # Get or create conversation
+        conv = await _get_or_create_explain_conv(book_id, chapter_id, mode, db)
+
+        # Load full history from DB
+        hist_result = await db.execute(
+            select(ExplainMessage)
+            .where(ExplainMessage.conversation_id == conv.id)
+            .order_by(ExplainMessage.id)
+        )
+        history_dicts = [
+            {"role": m.role.value, "content": m.content}
+            for m in hist_result.scalars().all()
+        ]
+
+        # Persist user message
+        db.add(ExplainMessage(
+            conversation_id=conv.id,
+            role=MessageRole.USER,
+            content=body.question.strip(),
+        ))
+        await db.commit()
+
+        # Stream and accumulate
+        accumulated: list[str] = []
         try:
             async for delta in explain_svc.stream_explain_chat(
                 body.question, body.explain_content, history_dicts, provider
             ):
+                accumulated.append(delta)
                 escaped = delta.replace("\n", "\\n")
                 yield f"data: {escaped}\n\n"
-            yield "data: [DONE]\n\n"
         except Exception as exc:
             err = str(exc).replace("\n", " ")
             yield f"data: [ERROR] {err}\n\n"
+            return
+
+        # Persist assistant message
+        full = "".join(accumulated)
+        if full.strip():
+            db.add(ExplainMessage(
+                conversation_id=conv.id,
+                role=MessageRole.ASSISTANT,
+                content=full,
+            ))
+            await db.commit()
+
+        yield "data: [DONE]\n\n"
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")

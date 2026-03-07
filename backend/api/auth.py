@@ -1,5 +1,5 @@
 """
-Authentication endpoints: login, logout, me, register, invite management.
+Authentication endpoints: login, logout, me, register, invite management, initial setup.
 """
 import secrets
 from datetime import datetime, timezone
@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 import bcrypt
 from fastapi import APIRouter, Depends, HTTPException, Response, Request
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.database import get_db
@@ -44,6 +44,13 @@ class RegisterIn(BaseModel):
     password: str
 
 
+class SetupIn(BaseModel):
+    username: str
+    email: str
+    password: str
+    setup_key: str
+
+
 class UserOut(BaseModel):
     id: int
     username: str
@@ -78,6 +85,62 @@ def _set_auth_cookie(response: Response, token: str) -> None:
         secure=settings.cookie_secure,
         max_age=86400 * 30,
     )
+
+
+# ---------------------------------------------------------------------------
+# Setup (first admin account)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/setup-status")
+async def setup_status(db: AsyncSession = Depends(get_db)):
+    """Check if initial setup is needed (no users exist)."""
+    result = await db.execute(select(func.count(User.id)))
+    count = result.scalar()
+    return {"needs_setup": count == 0}
+
+
+@router.post("/setup", response_model=UserOut)
+async def setup(body: SetupIn, response: Response, db: AsyncSession = Depends(get_db)):
+    """Create the first admin account. Requires SPINE_SETUP_KEY."""
+    # Check if users already exist
+    result = await db.execute(select(func.count(User.id)))
+    count = result.scalar()
+    if count > 0:
+        raise HTTPException(status_code=409, detail="Setup already completed.")
+
+    # Validate setup key
+    if not settings.setup_key:
+        raise HTTPException(
+            status_code=500,
+            detail="SPINE_SETUP_KEY not configured on server.",
+        )
+    if body.setup_key != settings.setup_key:
+        raise HTTPException(status_code=403, detail="Invalid setup key.")
+
+    # Validate inputs
+    username = body.username.strip()
+    if not username or len(username) > 64:
+        raise HTTPException(status_code=422, detail="Invalid username.")
+    email = body.email.strip().lower()
+    if not email or len(email) > 256:
+        raise HTTPException(status_code=422, detail="Invalid email.")
+    if len(body.password) < 8:
+        raise HTTPException(status_code=422, detail="Password must be at least 8 characters.")
+
+    user = User(
+        username=username,
+        email=email,
+        password_hash=_hash_password(body.password),
+        is_admin=True,
+    )
+    db.add(user)
+    await db.commit()
+    await db.refresh(user)
+
+    token = create_access_token(user.id, user.username)
+    _set_auth_cookie(response, token)
+    return user
 
 
 # ---------------------------------------------------------------------------
@@ -181,7 +244,7 @@ async def create_invite(
     await db.commit()
 
     base_url = str(request.base_url).rstrip("/")
-    # Point to frontend register page (port 3000 in dev)
+    # Point to frontend register page
     frontend_base = base_url.replace(":8000", ":3000")
     url = f"{frontend_base}/register?code={code}"
     return {"code": code, "url": url}

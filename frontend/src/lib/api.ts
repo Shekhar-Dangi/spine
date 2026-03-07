@@ -32,6 +32,14 @@ export const api = {
     logout: () =>
       req<{ ok: boolean }>("/api/auth/logout", { method: "POST" }),
     me: () => req<import("@/types").UserOut>("/api/auth/me"),
+    setupStatus: () =>
+      req<{ needs_setup: boolean }>("/api/auth/setup-status"),
+    setup: (username: string, email: string, password: string, setup_key: string) =>
+      req<import("@/types").UserOut>("/api/auth/setup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, email, password, setup_key }),
+      }),
     register: (
       invite_code: string,
       username: string,
@@ -143,14 +151,15 @@ export const api = {
       req<{ cached_modes: Record<string, string | null> }>(
         `/api/books/${bookId}/chapters/${chapterId}/explain/modes`,
       ),
-    chat: (
-      bookId: number,
-      chapterId: number,
-      question: string,
-      explainContent: string,
-      history: Array<{ role: "user" | "assistant"; content: string }>,
-    ) =>
-      `/api/books/${bookId}/chapters/${chapterId}/explain/chat` as string,
+    getChat: (bookId: number, chapterId: number, mode: string) =>
+      req<{ messages: Array<{ id: number; role: "user" | "assistant"; content: string; created_at: string }> }>(
+        `/api/books/${bookId}/chapters/${chapterId}/explain/chat?mode=${encodeURIComponent(mode)}`,
+      ),
+    clearChat: (bookId: number, chapterId: number, mode: string) =>
+      req<{ ok: boolean }>(
+        `/api/books/${bookId}/chapters/${chapterId}/explain/chat?mode=${encodeURIComponent(mode)}`,
+        { method: "DELETE" },
+      ),
   },
 
   map: {

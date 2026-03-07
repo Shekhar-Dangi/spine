@@ -5,12 +5,14 @@ All tables use integer primary keys + created_at timestamps.
 import enum
 from datetime import datetime, timezone
 
+from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
     Boolean,
     DateTime,
-    Enum,
+    Enum as _SaEnum,
     Float,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
@@ -19,6 +21,11 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from db.database import Base
+
+
+def Enum(enum_cls, **kw):
+    """Wrapper that ensures PostgreSQL native enums use .value (lowercase) not .name (uppercase)."""
+    return _SaEnum(enum_cls, values_callable=lambda e: [m.value for m in e], **kw)
 
 
 def _now() -> datetime:
@@ -87,6 +94,7 @@ class User(Base):
     invite_codes_created: Mapped[list["InviteCode"]] = relationship(
         foreign_keys="InviteCode.created_by_id", back_populates="created_by"
     )
+    model_profiles: Mapped[list["ModelProfile"]] = relationship(back_populates="user")
 
 
 class InviteCode(Base):
@@ -112,6 +120,9 @@ class InviteCode(Base):
 
 class Book(Base):
     __tablename__ = "books"
+    __table_args__ = (
+        Index("ix_books_user_id", "user_id"),
+    )
 
     id: Mapped[int] = mapped_column(
         Integer, primary_key=True, autoincrement=True)
@@ -164,6 +175,9 @@ class Book(Base):
 
 class Chapter(Base):
     __tablename__ = "chapters"
+    __table_args__ = (
+        Index("ix_chapters_book_id", "book_id"),
+    )
 
     id: Mapped[int] = mapped_column(
         Integer, primary_key=True, autoincrement=True)
@@ -196,9 +210,15 @@ class Chapter(Base):
 # Chunk
 # ---------------------------------------------------------------------------
 
+EMBEDDING_DIM = 384
+
 
 class Chunk(Base):
     __tablename__ = "chunks"
+    __table_args__ = (
+        Index("ix_chunks_book_id", "book_id"),
+        Index("ix_chunks_chapter_id", "chapter_id"),
+    )
 
     id: Mapped[int] = mapped_column(
         Integer, primary_key=True, autoincrement=True)
@@ -209,7 +229,8 @@ class Chunk(Base):
     anchor: Mapped[str | None] = mapped_column(
         String(256))  # page:offset or epub id
     embedding_id: Mapped[str | None] = mapped_column(
-        String(128))  # ChromaDB doc id
+        String(128))  # legacy ChromaDB doc id, kept for compatibility
+    embedding = mapped_column(Vector(EMBEDDING_DIM), nullable=True)
 
     book: Mapped["Book"] = relationship(back_populates="chunks")
     chapter: Mapped["Chapter | None"] = relationship(back_populates="chunks")
@@ -233,6 +254,7 @@ class ChapterExplain(Base):
     )
     mode: Mapped[str] = mapped_column(String(32), nullable=False, default="story")
     content: Mapped[str] = mapped_column(Text, nullable=False)
+    is_complete: Mapped[bool] = mapped_column(Boolean, default=False)
     generated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_now)
 
@@ -319,6 +341,9 @@ class Conversation(Base):
 
 class Message(Base):
     __tablename__ = "messages"
+    __table_args__ = (
+        Index("ix_messages_conversation_id", "conversation_id"),
+    )
 
     id: Mapped[int] = mapped_column(
         Integer, primary_key=True, autoincrement=True)
@@ -334,6 +359,40 @@ class Message(Base):
 
     conversation: Mapped["Conversation"] = relationship(
         back_populates="messages")
+
+
+# ---------------------------------------------------------------------------
+# ExplainConversation + ExplainMessage
+# ---------------------------------------------------------------------------
+
+
+class ExplainConversation(Base):
+    __tablename__ = "explain_conversations"
+    __table_args__ = (UniqueConstraint("chapter_id", "mode"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    book_id: Mapped[int] = mapped_column(ForeignKey("books.id"), nullable=False)
+    chapter_id: Mapped[int] = mapped_column(ForeignKey("chapters.id"), nullable=False)
+    mode: Mapped[str] = mapped_column(String(32), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+    messages: Mapped[list["ExplainMessage"]] = relationship(
+        back_populates="conversation", cascade="all, delete-orphan"
+    )
+
+
+class ExplainMessage(Base):
+    __tablename__ = "explain_messages"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    conversation_id: Mapped[int] = mapped_column(
+        ForeignKey("explain_conversations.id"), nullable=False
+    )
+    role: Mapped[MessageRole] = mapped_column(Enum(MessageRole), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+    conversation: Mapped["ExplainConversation"] = relationship(back_populates="messages")
 
 
 # ---------------------------------------------------------------------------
@@ -361,16 +420,23 @@ class ChapterMap(Base):
 
 
 # ---------------------------------------------------------------------------
-# ModelProfile
+# ModelProfile — per-user API key profiles
 # ---------------------------------------------------------------------------
 
 
 class ModelProfile(Base):
     __tablename__ = "model_profiles"
+    __table_args__ = (
+        UniqueConstraint("user_id", "name", name="uq_model_profiles_user_name"),
+        Index("ix_model_profiles_user_id", "user_id"),
+    )
 
     id: Mapped[int] = mapped_column(
         Integer, primary_key=True, autoincrement=True)
-    name: Mapped[str] = mapped_column(String(128), nullable=False, unique=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
     provider_type: Mapped[ProviderType] = mapped_column(
         Enum(ProviderType), nullable=False
     )
@@ -383,9 +449,11 @@ class ModelProfile(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_now)
 
+    user: Mapped["User"] = relationship(back_populates="model_profiles")
+
 
 # ---------------------------------------------------------------------------
-# TaskProviderMapping — maps a routing task to a specific ModelProfile.
+# TaskProviderMapping — per-user, maps a routing task to a specific ModelProfile.
 # If profile_id is NULL the system falls back to the active profile.
 # ---------------------------------------------------------------------------
 
@@ -395,8 +463,15 @@ ROUTING_TASKS = ("dossier", "explain", "qa", "map_extract", "toc_extract")
 
 class TaskProviderMapping(Base):
     __tablename__ = "task_provider_mappings"
+    __table_args__ = (
+        UniqueConstraint("user_id", "task_name", name="uq_task_mapping_user_task"),
+    )
 
-    task_name: Mapped[str] = mapped_column(String(64), primary_key=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    task_name: Mapped[str] = mapped_column(String(64), nullable=False)
     profile_id: Mapped[int | None] = mapped_column(
         ForeignKey("model_profiles.id", ondelete="SET NULL"), nullable=True
     )

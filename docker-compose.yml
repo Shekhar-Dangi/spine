@@ -1,0 +1,15 @@
+services:
+  db:
+    image: pgvector/pgvector:pg17
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: spine
+      POSTGRES_PASSWORD: spine
+      POSTGRES_DB: spine
+    ports:
+      - "5433:5432"
+    volumes:
+      - spine_pgdata:/var/lib/postgresql/data
+
+volumes:
+  spine_pgdata:

@@ -1,5 +1,5 @@
 """
-Model profile management endpoints.
+Model profile management endpoints — per-user API key isolation.
 """
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -67,6 +67,7 @@ async def create_profile(
     current_user: User = Depends(get_current_user),
 ):
     profile = ModelProfile(
+        user_id=current_user.id,
         name=body.name,
         provider_type=body.provider_type,
         key_ref=encrypt_key(body.api_key),
@@ -85,7 +86,11 @@ async def list_profiles(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    result = await db.execute(select(ModelProfile).order_by(ModelProfile.created_at))
+    result = await db.execute(
+        select(ModelProfile)
+        .where(ModelProfile.user_id == current_user.id)
+        .order_by(ModelProfile.created_at)
+    )
     return [_profile_out(p) for p in result.scalars().all()]
 
 
@@ -97,7 +102,7 @@ async def update_profile(
     current_user: User = Depends(get_current_user),
 ):
     profile = await db.get(ModelProfile, profile_id)
-    if not profile:
+    if not profile or profile.user_id != current_user.id:
         raise HTTPException(status_code=404, detail="Profile not found.")
     if body.name is not None:
         profile.name = body.name
@@ -121,7 +126,7 @@ async def delete_profile(
     current_user: User = Depends(get_current_user),
 ):
     profile = await db.get(ModelProfile, profile_id)
-    if not profile:
+    if not profile or profile.user_id != current_user.id:
         raise HTTPException(status_code=404, detail="Profile not found.")
     await db.delete(profile)
     await db.commit()
@@ -135,7 +140,7 @@ async def test_profile(
     current_user: User = Depends(get_current_user),
 ):
     profile = await db.get(ModelProfile, profile_id)
-    if not profile:
+    if not profile or profile.user_id != current_user.id:
         raise HTTPException(status_code=404, detail="Profile not found.")
     provider = build_provider(profile)
     ok = await provider.health_check()
@@ -159,7 +164,7 @@ def _profile_out(p: ModelProfile) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Task-Provider Routing
+# Task-Provider Routing (per-user)
 # ---------------------------------------------------------------------------
 
 
@@ -178,7 +183,11 @@ async def get_task_mapping(
     current_user: User = Depends(get_current_user),
 ):
     """Return the current task→profile_id mapping for all routing tasks."""
-    result = await db.execute(select(TaskProviderMapping))
+    result = await db.execute(
+        select(TaskProviderMapping).where(
+            TaskProviderMapping.user_id == current_user.id
+        )
+    )
     rows = {r.task_name: r.profile_id for r in result.scalars().all()}
     return {task: rows.get(task) for task in ROUTING_TASKS}
 
@@ -190,7 +199,7 @@ async def set_task_mapping(
     current_user: User = Depends(get_current_user),
 ):
     """
-    Upsert task→profile_id mappings.
+    Upsert task→profile_id mappings for the current user.
     Pass null for a task to clear its mapping (will fall back to active profile).
     """
     updates = body.model_dump()
@@ -198,19 +207,33 @@ async def set_task_mapping(
         profile_id = updates.get(task_name)
         if profile_id is not None:
             profile = await db.get(ModelProfile, profile_id)
-            if not profile:
+            if not profile or profile.user_id != current_user.id:
                 raise HTTPException(
                     status_code=400,
                     detail=f"Profile id={profile_id} not found (task: {task_name}).",
                 )
-        existing = await db.get(TaskProviderMapping, task_name)
+        # Find existing mapping for this user + task
+        result = await db.execute(
+            select(TaskProviderMapping).where(
+                TaskProviderMapping.user_id == current_user.id,
+                TaskProviderMapping.task_name == task_name,
+            )
+        )
+        existing = result.scalar_one_or_none()
         if existing is None:
             db.add(TaskProviderMapping(
-                task_name=task_name, profile_id=profile_id))
+                user_id=current_user.id,
+                task_name=task_name,
+                profile_id=profile_id,
+            ))
         else:
             existing.profile_id = profile_id
 
     await db.commit()
-    result = await db.execute(select(TaskProviderMapping))
+    result = await db.execute(
+        select(TaskProviderMapping).where(
+            TaskProviderMapping.user_id == current_user.id
+        )
+    )
     rows = {r.task_name: r.profile_id for r in result.scalars().all()}
     return {task: rows.get(task) for task in ROUTING_TASKS}

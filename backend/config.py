@@ -8,8 +8,6 @@ BASE_DIR = Path(__file__).parent
 STORAGE_DIR = BASE_DIR / "storage"
 UPLOADS_DIR = STORAGE_DIR / "uploads"
 PARSED_DIR = STORAGE_DIR / "parsed"
-DB_PATH = STORAGE_DIR / "spine.db"
-CHROMA_DIR = STORAGE_DIR / "chroma"
 KEY_FILE = STORAGE_DIR / ".spine.key"
 JWT_SECRET_FILE = STORAGE_DIR / ".jwt_secret"
 
@@ -29,8 +27,7 @@ def _load_or_create_jwt_secret() -> str:
 class Settings(BaseSettings):
     app_name: str = "Spine"
     debug: bool = False
-    db_url: str = f"sqlite+aiosqlite:///{DB_PATH}"
-    chroma_path: str = str(CHROMA_DIR)
+    db_url: str = "postgresql+asyncpg://spine:spine@localhost:5433/spine"
     uploads_path: str = str(UPLOADS_DIR)
     parsed_path: str = str(PARSED_DIR)
     key_file_path: str = str(KEY_FILE)
@@ -41,8 +38,11 @@ class Settings(BaseSettings):
     jwt_expire_minutes: int = 43200  # 30 days
     cookie_secure: bool = False  # set True in production via env
     cors_origins: str = "http://localhost:3000"
+    # Admin setup key — required to create the first admin account
+    setup_key: str = ""
 
     class Config:
+        env_prefix = "SPINE_"
         env_file = BASE_DIR / ".env"
         env_file_encoding = "utf-8"
 
@@ -50,7 +50,7 @@ class Settings(BaseSettings):
 settings = Settings()
 
 # Ensure directories exist at import time
-for _dir in (UPLOADS_DIR, PARSED_DIR, CHROMA_DIR):
+for _dir in (UPLOADS_DIR, PARSED_DIR):
     _dir.mkdir(parents=True, exist_ok=True)
 
 # Load/create JWT secret after storage dirs exist

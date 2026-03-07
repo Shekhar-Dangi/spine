@@ -1,5 +1,8 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkMath from "remark-math";
+import rehypeKatex from "rehype-katex";
 import { api, streamPost } from "@/lib/api";
 import { useBookReader } from "@/contexts/BookReaderContext";
 import type { ConversationMessage } from "@/types";
@@ -10,6 +13,7 @@ export default function QaView({ bookId }: Props) {
   const { activeChapterId, selectedText, setSelectedText } = useBookReader();
   const [messages, setMessages] = useState<ConversationMessage[]>([]);
   const [streamingContent, setStreamingContent] = useState<string | null>(null);
+  const [pendingQuestion, setPendingQuestion] = useState<string | null>(null);
   const [question, setQuestion] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -27,7 +31,7 @@ export default function QaView({ bookId }: Props) {
   // Scroll to bottom on new messages
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, streamingContent]);
+  }, [messages, pendingQuestion, streamingContent]);
 
   const handleAsk = () => {
     if (!question.trim() || !activeChapterId || loading) return;
@@ -36,16 +40,8 @@ export default function QaView({ bookId }: Props) {
     setQuestion("");
     setError(null);
     setStreamingContent("");
+    setPendingQuestion(q);
     setLoading(true);
-
-    const tempUserMsg: ConversationMessage = {
-      id: Date.now(),
-      role: "user",
-      content: q,
-      chapter_id: activeChapterId,
-      created_at: new Date().toISOString(),
-    };
-    setMessages((prev) => [...prev, tempUserMsg]);
 
     abortRef.current?.abort();
     const ctrl = new AbortController();
@@ -63,6 +59,7 @@ export default function QaView({ bookId }: Props) {
         setStreamingContent(null);
         setLoading(false);
         setSelectedText("");
+        setPendingQuestion(null);
         api.qa.getConversation(bookId, activeChapterId)
           .then((data) => setMessages(data.messages))
           .catch(() => {});
@@ -71,6 +68,7 @@ export default function QaView({ bookId }: Props) {
         if (ctrl.signal.aborted) return;
         setError(err.message);
         setStreamingContent(null);
+        setPendingQuestion(null);
         setLoading(false);
       },
       ctrl.signal,
@@ -80,6 +78,7 @@ export default function QaView({ bookId }: Props) {
   const handleStop = () => {
     abortRef.current?.abort();
     setStreamingContent(null);
+    setPendingQuestion(null);
     setLoading(false);
   };
 
@@ -98,6 +97,10 @@ export default function QaView({ bookId }: Props) {
         {messages.map((msg) => (
           <MessageBubble key={msg.id} role={msg.role} content={msg.content} />
         ))}
+
+        {pendingQuestion !== null && (
+          <MessageBubble role="user" content={pendingQuestion} />
+        )}
 
         {streamingContent !== null && (
           <MessageBubble role="assistant" content={streamingContent} streaming />
@@ -181,8 +184,10 @@ function MessageBubble({
       <div className="shrink-0 w-5 h-5 mt-0.5 rounded-full bg-stone-200 dark:bg-stone-700 flex items-center justify-center text-[8px] text-stone-500 dark:text-stone-400 font-bold tracking-wide">
         AI
       </div>
-      <div className="flex-1 text-sm text-stone-700 dark:text-stone-300 leading-7 whitespace-pre-wrap">
-        {content}
+      <div className="flex-1 text-sm text-stone-700 dark:text-stone-300 leading-7 prose prose-sm prose-stone dark:prose-invert max-w-none">
+        <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
+          {content}
+        </ReactMarkdown>
         {streaming && (
           <span className="inline-block w-1.5 h-4 ml-0.5 bg-amber-500 animate-pulse rounded-sm align-middle" />
         )}

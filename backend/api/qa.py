@@ -36,7 +36,7 @@ async def ask(
         raise HTTPException(status_code=422, detail="Question cannot be empty.")
 
     from providers.registry import get_provider_for_task
-    provider = await get_provider_for_task("qa", db)
+    provider = await get_provider_for_task("qa", db, current_user.id)
 
     async def event_stream():
         async for delta in qa_svc.stream_qa(

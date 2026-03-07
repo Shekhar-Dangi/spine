@@ -85,6 +85,15 @@ async def upload_book(
         raise HTTPException(
             status_code=400, detail="Only PDF and EPUB files are supported.")
 
+    # Enforce file size limit (100 MB)
+    MAX_UPLOAD_BYTES = 100 * 1024 * 1024
+    file.file.seek(0, 2)  # seek to end
+    size = file.file.tell()
+    file.file.seek(0)  # seek back
+    if size > MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=413, detail=f"File too large ({size // (1024*1024)} MB). Max is 100 MB.")
+
     fmt = BookFormat.PDF if ext == ".pdf" else BookFormat.EPUB
     dest_name = f"{uuid.uuid4().hex}{ext}"
     dest_path = Path(settings.uploads_path) / dest_name
@@ -307,6 +316,7 @@ async def suggest_toc(
             toc_pdf_page_end=body.toc_pdf_page_end,
             page_offset=body.page_offset,
             db=db,
+            user_id=current_user.id,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))

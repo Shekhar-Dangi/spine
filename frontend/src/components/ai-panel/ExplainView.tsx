@@ -79,6 +79,7 @@ export default function ExplainView({ bookId }: Props) {
   // Chat state
   const [activeView, setActiveView] = useState<"explain" | "chat">("explain");
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [chatPending, setChatPending] = useState<string | null>(null);
   const [chatQuestion, setChatQuestion] = useState("");
   const [chatStreaming, setChatStreaming] = useState(false);
   const [chatStreamContent, setChatStreamContent] = useState<string | null>(null);
@@ -197,6 +198,7 @@ export default function ExplainView({ bookId }: Props) {
   function handleTabClick(modeKey: string) {
     setActiveMode(modeKey);
     setActiveView("explain");
+    setChatMessages([]);
     if (!activeChapterId) return;
 
     const ck = cacheKey(activeChapterId, modeKey);
@@ -216,15 +218,18 @@ export default function ExplainView({ bookId }: Props) {
     }
   }
 
+  function loadChatFromDb(chId: number, mode: string) {
+    api.explain.getChat(bookId, chId, mode)
+      .then((data) => setChatMessages(data.messages as ChatMessage[]))
+      .catch(() => {});
+  }
+
   function sendChatMessage() {
     if (!chatQuestion.trim() || !activeChapterId || chatStreaming) return;
 
     const q = chatQuestion.trim();
     setChatQuestion("");
-
-    const userMsg: ChatMessage = { role: "user", content: q };
-    const updatedHistory = [...chatMessages, userMsg];
-    setChatMessages(updatedHistory);
+    setChatPending(q);
 
     chatAbortRef.current?.abort();
     const ctrl = new AbortController();
@@ -233,15 +238,9 @@ export default function ExplainView({ bookId }: Props) {
     setChatStreaming(true);
     setChatStreamContent("");
 
-    const historyForBackend = chatMessages;
-
     streamPost(
-      `/api/books/${bookId}/chapters/${activeChapterId}/explain/chat`,
-      {
-        question: q,
-        explain_content: ms.content ?? "",
-        history: historyForBackend,
-      },
+      `/api/books/${bookId}/chapters/${activeChapterId}/explain/chat?mode=${encodeURIComponent(activeMode)}`,
+      { question: q, explain_content: ms.content ?? "" },
       (delta) => {
         if (ctrl.signal.aborted) return;
         setChatStreamContent((prev) => (prev ?? "") + delta.replace(/\\n/g, "\n"));
@@ -249,17 +248,15 @@ export default function ExplainView({ bookId }: Props) {
       () => {
         if (ctrl.signal.aborted) return;
         setChatStreaming(false);
-        setChatStreamContent((finalContent) => {
-          if (finalContent) {
-            setChatMessages((prev) => [...prev, { role: "assistant", content: finalContent }]);
-          }
-          return null;
-        });
+        setChatStreamContent(null);
+        setChatPending(null);
+        loadChatFromDb(activeChapterId!, activeMode);
       },
       (err) => {
         if (ctrl.signal.aborted) return;
         setChatStreaming(false);
         setChatStreamContent(null);
+        setChatPending(null);
         setChatMessages((prev) => [
           ...prev,
           { role: "assistant", content: `Error: ${err.message}` },
@@ -271,7 +268,7 @@ export default function ExplainView({ bookId }: Props) {
 
   useEffect(() => {
     chatBottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [chatMessages, chatStreamContent]);
+  }, [chatMessages, chatPending, chatStreamContent]);
 
   // Close export menu on outside click
   useEffect(() => {
@@ -422,7 +419,13 @@ export default function ExplainView({ bookId }: Props) {
               {/* Chat toggle */}
               {hasContent && activeChapterId && (
                 <button
-                  onClick={() => setActiveView((v) => (v === "chat" ? "explain" : "chat"))}
+                  onClick={() => {
+                    setActiveView((v) => {
+                      const next = v === "chat" ? "explain" : "chat";
+                      if (next === "chat" && activeChapterId) loadChatFromDb(activeChapterId, activeMode);
+                      return next;
+                    });
+                  }}
                   className={`h-7 px-2.5 flex items-center gap-1.5 rounded-md text-[11px] font-medium transition-colors ${
                     activeView === "chat"
                       ? "bg-amber-100 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300"
@@ -589,7 +592,12 @@ export default function ExplainView({ bookId }: Props) {
               <>
                 <span className="text-stone-300 dark:text-stone-700">·</span>
                 <button
-                  onClick={() => setChatMessages([])}
+                  onClick={() => {
+                    if (!activeChapterId) return;
+                    api.explain.clearChat(bookId, activeChapterId, activeMode)
+                      .then(() => setChatMessages([]))
+                      .catch(() => {});
+                  }}
                   className="text-[11px] text-stone-400 hover:text-stone-600 dark:hover:text-stone-300 transition-colors"
                 >
                   Clear history
@@ -660,7 +668,7 @@ export default function ExplainView({ bookId }: Props) {
       {activeView === "chat" && (
         <div className="flex-1 flex flex-col overflow-hidden">
           <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
-            {chatMessages.length === 0 && !chatStreamContent && (
+            {chatMessages.length === 0 && !chatPending && !chatStreamContent && (
               <p className="text-xs text-stone-400 dark:text-stone-600 mt-2 leading-relaxed">
                 Ask anything about the <span className="font-medium">{templates.find(t => t.key === activeMode)?.name ?? activeMode}</span> explanation above.
               </p>
@@ -668,6 +676,9 @@ export default function ExplainView({ bookId }: Props) {
             {chatMessages.map((msg, i) => (
               <ChatBubble key={i} role={msg.role} content={msg.content} />
             ))}
+            {chatPending !== null && (
+              <ChatBubble role="user" content={chatPending} />
+            )}
             {chatStreamContent !== null && (
               <ChatBubble role="assistant" content={chatStreamContent} streaming />
             )}
@@ -745,8 +756,10 @@ function ChatBubble({
       <div className="shrink-0 w-5 h-5 mt-0.5 rounded-full bg-stone-200 dark:bg-stone-700 flex items-center justify-center text-[8px] text-stone-500 dark:text-stone-400 font-bold tracking-wide">
         AI
       </div>
-      <div className="flex-1 text-sm text-stone-700 dark:text-stone-300 leading-7 whitespace-pre-wrap">
-        {content}
+      <div className="flex-1 text-sm text-stone-700 dark:text-stone-300 leading-7 prose prose-sm prose-stone dark:prose-invert max-w-none">
+        <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
+          {content}
+        </ReactMarkdown>
         {streaming && (
           <span className="inline-block w-1.5 h-4 ml-0.5 bg-amber-500 animate-pulse rounded-sm align-middle" />
         )}

@@ -32,7 +32,7 @@ async def generate_map(
         raise HTTPException(status_code=404, detail="Chapter not found.")
 
     from providers.registry import get_provider_for_task
-    provider = await get_provider_for_task("map_extract", db)
+    provider = await get_provider_for_task("map_extract", db, current_user.id)
 
     async def _task():
         async with AsyncSessionLocal() as bg_db:

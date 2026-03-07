@@ -40,6 +40,7 @@ async def suggest_toc(
     page_offset: int,             # filler pages before content: pdf_page = book_page + page_offset
     db: AsyncSession,
     toc_pdf_page_end: int | None = None,  # 1-indexed end page (inclusive); defaults to start
+    user_id: int | None = None,
 ) -> list[dict]:
     """
     Return a list of suggested chapters from the given PDF TOC page range.
@@ -80,7 +81,7 @@ async def suggest_toc(
             "Only text-based PDFs are supported."
         )
 
-    provider = await get_provider_for_task("toc_extract", db)
+    provider = await get_provider_for_task("toc_extract", db, user_id)
 
     response = await provider.generate_text(
         messages=[{"role": "user", "content": _PROMPT.format(text=page_text)}],

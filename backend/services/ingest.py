@@ -2,7 +2,7 @@
 Ingestion service — full Phase 3 implementation.
 
 parse_book()    → parse PDF/EPUB, extract TOC, create draft chapters
-confirm_toc()   → user-confirmed chapters → chunk → embed → ChromaDB → READY
+confirm_toc()   → user-confirmed chapters → chunk → embed → pgvector → READY
 delete_book_artefacts() → hard-delete all data for a book
 """
 import asyncio
@@ -11,27 +11,12 @@ import re
 import shutil
 from pathlib import Path
 
-import chromadb
 import fitz  # PyMuPDF
-from sqlalchemy import delete as sql_delete, select
+from sqlalchemy import delete as sql_delete, select, update as sql_update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import settings
 from db.models import Book, BookFormat, Chapter, ChapterExplain, ChapterMap, Chunk, IngestStatus
-
-
-# ---------------------------------------------------------------------------
-# ChromaDB client (module-level singleton)
-# ---------------------------------------------------------------------------
-
-_chroma: chromadb.ClientAPI | None = None
-
-
-def _get_chroma() -> chromadb.ClientAPI:
-    global _chroma
-    if _chroma is None:
-        _chroma = chromadb.PersistentClient(path=settings.chroma_path)
-    return _chroma
 
 
 # ---------------------------------------------------------------------------
@@ -93,7 +78,6 @@ def _pdf_heading_fallback(doc: fitz.Document) -> list[tuple[str, int]]:
         return []
 
     # Heading size = top ~15% of font sizes by frequency-weighted rank
-    sorted_sizes = sorted(size_counts.keys(), reverse=True)
     body_size = sorted(size_counts.keys(),
                        key=lambda s: size_counts[s], reverse=True)[0]
     heading_threshold = body_size * 1.15
@@ -310,7 +294,7 @@ async def confirm_toc(
     db: AsyncSession,
 ) -> None:
     """
-    Accept user-confirmed chapters → chunk → embed locally → ChromaDB → READY.
+    Accept user-confirmed chapters → chunk → embed locally → pgvector → READY.
     Embedding uses fastembed (local, free) — no provider/API key needed.
     """
     book = await db.get(Book, book_id)
@@ -330,9 +314,8 @@ async def confirm_toc(
         parsed_dir = Path(settings.parsed_path) / str(book_id)
         parsed_dir.mkdir(parents=True, exist_ok=True)
 
+        all_chunk_rows: list[Chunk] = []
         all_texts: list[str] = []
-        all_ids: list[str] = []
-        all_metas: list[dict] = []
         quality_warnings: list[str] = []
 
         for ch_data in chapters:
@@ -387,41 +370,34 @@ async def confirm_toc(
                     else f"{ch_data.get('start_anchor', '')}:{c_idx}"
                 )
                 chunk_id = f"b{book_id}_ch{chapter.id}_c{c_idx}"
-                db.add(Chunk(
+                chunk_row = Chunk(
                     book_id=book_id,
                     chapter_id=chapter.id,
                     text=chunk_text,
                     anchor=anchor,
                     embedding_id=chunk_id,
-                ))
+                )
+                db.add(chunk_row)
+                all_chunk_rows.append(chunk_row)
                 all_texts.append(chunk_text)
-                all_ids.append(chunk_id)
-                all_metas.append(
-                    {"chapter_id": str(chapter.id), "book_id": str(book_id), "anchor": anchor})
 
         await db.commit()
 
-        # Embed locally and upsert into ChromaDB in batches
-        # Both fastembed inference and ChromaDB upsert are CPU-bound sync
-        # operations — run them in a thread pool to keep the event loop free.
+        # Embed locally and store vectors in pgvector in batches
         if all_texts:
             from services.embedder import embed_texts as local_embed
-            chroma = _get_chroma()
-            col = chroma.get_or_create_collection(
-                f"book_{book_id}",
-                metadata={"hnsw:space": "cosine"},
-            )
             batch = 100
             for i in range(0, len(all_texts), batch):
                 batch_texts = all_texts[i: i + batch]
                 embeddings = await asyncio.to_thread(local_embed, batch_texts)
-                await asyncio.to_thread(
-                    col.upsert,
-                    ids=all_ids[i: i + batch],
-                    embeddings=embeddings,
-                    documents=batch_texts,
-                    metadatas=all_metas[i: i + batch],
-                )
+                batch_rows = all_chunk_rows[i: i + batch]
+                for row, vec in zip(batch_rows, embeddings):
+                    await db.execute(
+                        sql_update(Chunk)
+                        .where(Chunk.id == row.id)
+                        .values(embedding=vec)
+                    )
+            await db.commit()
 
         book.ingest_quality_json = json.dumps({"warnings": quality_warnings})
         book.ingest_status = IngestStatus.READY
@@ -438,7 +414,7 @@ async def retry_embed(book_id: int, db: AsyncSession) -> None:
     """
     Re-run only the embedding step for a FAILED book.
     Chunks are already in the DB from the previous confirm_toc() run —
-    this just re-embeds and upserts them into ChromaDB.
+    this just re-embeds and stores vectors in pgvector.
     """
     book = await db.get(Book, book_id)
     if book is None:
@@ -458,32 +434,21 @@ async def retry_embed(book_id: int, db: AsyncSession) -> None:
 
         from services.embedder import embed_texts as local_embed
 
-        chroma = _get_chroma()
-        col = chroma.get_or_create_collection(
-            f"book_{book_id}",
-            metadata={"hnsw:space": "cosine"},
-        )
-
         all_texts = [c.text for c in chunks]
-        all_ids = [
-            c.embedding_id or f"b{book_id}_fallback_{c.id}" for c in chunks]
-        all_metas = [
-            {"chapter_id": str(c.chapter_id), "book_id": str(
-                book_id), "anchor": c.anchor or ""}
-            for c in chunks
-        ]
+        all_ids = [c.id for c in chunks]
 
         batch = 100
         for i in range(0, len(all_texts), batch):
             batch_texts = all_texts[i: i + batch]
             embeddings = await asyncio.to_thread(local_embed, batch_texts)
-            await asyncio.to_thread(
-                col.upsert,
-                ids=all_ids[i: i + batch],
-                embeddings=embeddings,
-                documents=batch_texts,
-                metadatas=all_metas[i: i + batch],
-            )
+            batch_ids = all_ids[i: i + batch]
+            for chunk_id, vec in zip(batch_ids, embeddings):
+                await db.execute(
+                    sql_update(Chunk)
+                    .where(Chunk.id == chunk_id)
+                    .values(embedding=vec)
+                )
+        await db.commit()
 
         book.ingest_status = IngestStatus.READY
         book.ingest_error = None
@@ -498,16 +463,10 @@ async def retry_embed(book_id: int, db: AsyncSession) -> None:
 
 async def reset_and_reparse(book_id: int, db: AsyncSession) -> None:
     """
-    Wipe all derived data for a book (chunks, chapters, explains, maps, ChromaDB
-    collection, parsed text files) and re-run parse_book() so the user can
+    Wipe all derived data for a book (chunks, chapters, explains, maps,
+    parsed text files) and re-run parse_book() so the user can
     review and confirm the TOC again.
     """
-    # --- ChromaDB collection -------------------------------------------------
-    try:
-        _get_chroma().delete_collection(f"book_{book_id}")
-    except Exception:
-        pass
-
     # --- Parsed text files ---------------------------------------------------
     parsed_dir = Path(settings.parsed_path) / str(book_id)
     if parsed_dir.exists():
@@ -525,13 +484,7 @@ async def reset_and_reparse(book_id: int, db: AsyncSession) -> None:
 
 
 async def delete_book_artefacts(book_id: int, file_path: str, db: AsyncSession) -> None:
-    """Hard-delete: file, parsed artefacts, ChromaDB collection, all DB rows."""
-    # ChromaDB
-    try:
-        _get_chroma().delete_collection(f"book_{book_id}")
-    except Exception:
-        pass
-
+    """Hard-delete: file, parsed artefacts, all DB rows."""
     # Filesystem
     upload = Path(file_path)
     if upload.exists():

@@ -14,6 +14,20 @@ from config import settings
 from db.models import Book, Chapter, Chunk, ChapterExplain
 
 # ---------------------------------------------------------------------------
+# Safe template formatting (blocks __class__ style injection)
+# ---------------------------------------------------------------------------
+
+
+class _SafeDict(dict):
+    """A dict subclass that blocks attribute access in format strings."""
+    def __getattr__(self, name):
+        raise AttributeError(f"Access to '{name}' is not allowed in templates")
+
+    def __format__(self, format_spec):
+        raise ValueError("Format spec not allowed on template dict")
+
+
+# ---------------------------------------------------------------------------
 # Prompt templates
 # ---------------------------------------------------------------------------
 
@@ -281,6 +295,7 @@ async def _persist_explain(
     chapter_id: int,
     mode: str,
     content: str,
+    is_complete: bool = False,
 ) -> None:
     """Upsert explain content to DB."""
     result = await db.execute(
@@ -292,6 +307,7 @@ async def _persist_explain(
     existing = result.scalar_one_or_none()
     if existing:
         existing.content = content
+        existing.is_complete = is_complete
         existing.generated_at = datetime.now(timezone.utc)
     else:
         db.add(ChapterExplain(
@@ -299,6 +315,7 @@ async def _persist_explain(
             chapter_id=chapter_id,
             mode=mode,
             content=content,
+            is_complete=is_complete,
             generated_at=datetime.now(timezone.utc),
         ))
     await db.commit()
@@ -329,7 +346,7 @@ async def stream_explain(
         yield "Error: book or chapter not found."
         return
 
-    # Return cached result if available and not forcing regeneration
+    # Return cached result if available, complete, and not forcing regeneration
     if not force:
         result = await db.execute(
             select(ChapterExplain).where(
@@ -338,7 +355,7 @@ async def stream_explain(
             )
         )
         cached = result.scalar_one_or_none()
-        if cached:
+        if cached and cached.is_complete:
             yield cached.content
             return
 
@@ -349,18 +366,20 @@ async def stream_explain(
         return
 
     template = template_override if template_override else _MODE_PROMPTS[mode]
+    # Use format_map with a restricted dict to prevent template injection
+    allowed_vars = {
+        "book_title": book.title,
+        "author": book.author or "Unknown",
+        "chapter_num": str(chapter.chapter_index + 1),
+        "chapter_title": chapter.title,
+        "chapter_text": chapter_text[:_MAX_CHAPTER_CHARS],
+    }
     try:
-        prompt = template.format(
-            book_title=book.title,
-            author=book.author or "Unknown",
-            chapter_num=chapter.chapter_index + 1,
-            chapter_title=chapter.title,
-            chapter_text=chapter_text[:_MAX_CHAPTER_CHARS],
-        )
-    except KeyError as exc:
+        prompt = template.format_map(_SafeDict(allowed_vars))
+    except (KeyError, ValueError) as exc:
         yield (
-            f"Error: template contains unknown variable {exc}. "
-            "Available: {book_title}, {author}, {chapter_num}, {chapter_title}, {chapter_text}."
+            f"Error: template issue — {exc}. "
+            "Available variables: {book_title}, {author}, {chapter_num}, {chapter_title}, {chapter_text}."
         )
         return
 
@@ -370,15 +389,20 @@ async def stream_explain(
     ]
 
     accumulated: list[str] = []
+    stream_completed = False
     try:
         async for delta in provider.stream_text(messages, max_tokens=16000):
             accumulated.append(delta)
             yield delta
+        stream_completed = True
     finally:
         # Always persist accumulated content, even if client disconnected mid-stream
         full_content = "".join(accumulated)
         if full_content.strip():
-            await _persist_explain(db, book_id, chapter_id, mode, full_content)
+            await _persist_explain(
+                db, book_id, chapter_id, mode, full_content,
+                is_complete=stream_completed,
+            )
 
 
 async def stream_explain_chat(

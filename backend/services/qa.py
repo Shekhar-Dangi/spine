@@ -6,18 +6,16 @@ can swap it out without touching streaming or persistence logic.
 
 Context sources (V1):
   1. selected_text  — the user's highlighted anchor (optional)
-  2. ChromaDB chunks — top-5 from the chapter, scored by embedding similarity
+  2. pgvector chunks — top-5 from the chapter, scored by cosine similarity
   3. recent_turns   — last 6 messages (3 Q&A pairs) from the conversation
 """
 import logging
 from typing import AsyncIterator
 
-import chromadb
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from config import settings
-from db.models import Book, Conversation, Message, MessageRole
+from db.models import Book, Chunk, Conversation, Message, MessageRole
 from services.embedder import embed_query
 
 log = logging.getLogger(__name__)
@@ -66,24 +64,32 @@ def assemble_context(
 
 
 # ---------------------------------------------------------------------------
-# ChromaDB retrieval
+# pgvector retrieval
 # ---------------------------------------------------------------------------
 
 
-def _retrieve_chunks(book_id: int, chapter_id: int, query: str, k: int = 5) -> list[str]:
+async def _retrieve_chunks(
+    book_id: int, chapter_id: int, query: str, db: AsyncSession, k: int = 5
+) -> list[str]:
     try:
-        chroma = chromadb.PersistentClient(path=settings.chroma_path)
-        collection = chroma.get_collection(f"book_{book_id}")
         query_vec = embed_query(query)
-        results = collection.query(
-            query_embeddings=[query_vec],
-            n_results=k,
-            where={"chapter_id": str(chapter_id)},
+        # Use pgvector cosine distance operator <=>
+        result = await db.execute(
+            text("""
+                SELECT text
+                FROM chunks
+                WHERE chapter_id = :chapter_id
+                  AND book_id = :book_id
+                  AND embedding IS NOT NULL
+                ORDER BY embedding <=> :query_vec
+                LIMIT :k
+            """),
+            {"chapter_id": chapter_id, "book_id": book_id, "query_vec": str(query_vec), "k": k},
         )
-        docs = results.get("documents", [[]])[0]
-        return [d for d in docs if d]
+        rows = result.fetchall()
+        return [row[0] for row in rows if row[0]]
     except Exception as exc:
-        log.warning("ChromaDB retrieval failed for book %d chapter %d: %s", book_id, chapter_id, exc)
+        log.warning("pgvector retrieval failed for book %d chapter %d: %s", book_id, chapter_id, exc)
         return []
 
 
@@ -150,7 +156,7 @@ async def stream_qa(
         return
 
     conv = await _get_or_create_conversation(book_id, db)
-    chunks = _retrieve_chunks(book_id, chapter_id, question)
+    chunks = await _retrieve_chunks(book_id, chapter_id, question, db)
     recent_turns = await _get_recent_turns(conv.id, n_pairs=3, db=db)
 
     context = assemble_context(selected_text, question, chunks, recent_turns)
