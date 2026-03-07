@@ -17,6 +17,8 @@ function getLocalNetworkIPs(): string[] {
 const nextConfig: NextConfig = {
   allowedDevOrigins: getLocalNetworkIPs(),
   async rewrites() {
+    // Used in local dev only. On Vercel, vercel.json external rewrites
+    // handle /api/* at the CDN layer (bypasses the 4.5MB function limit).
     const backendUrl = process.env.BACKEND_URL ?? "http://localhost:8000";
     return [
       {
