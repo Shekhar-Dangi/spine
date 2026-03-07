@@ -6,12 +6,22 @@ const PUBLIC_PATHS = ["/login", "/register", "/setup"];
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  // Allow public paths
+  // Proxy /api/* to FastAPI backend — before any auth check
+  if (pathname.startsWith("/api/")) {
+    const backendUrl = process.env.BACKEND_URL ?? "http://localhost:8000";
+    const destination = new URL(
+      pathname + request.nextUrl.search,
+      backendUrl
+    );
+    return NextResponse.rewrite(destination);
+  }
+
+  // Allow public page routes without auth
   if (PUBLIC_PATHS.some((p) => pathname.startsWith(p))) {
     return NextResponse.next();
   }
 
-  // Check for auth cookie
+  // Check for auth cookie on protected page routes
   const token = request.cookies.get("spine_auth");
   if (!token) {
     const loginUrl = new URL("/login", request.url);
@@ -23,13 +33,5 @@ export function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: [
-    /*
-     * Match all paths except:
-     * - _next/static, _next/image (Next.js internals)
-     * - favicon.ico
-     * - API routes (handled by backend)
-     */
-    "/((?!_next/static|_next/image|favicon.ico).*)",
-  ],
+  matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
 };
