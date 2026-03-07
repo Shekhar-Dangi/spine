@@ -15,6 +15,13 @@ async def get_current_user(
 ) -> User:
     token = request.cookies.get("spine_auth")
     if not token:
+        # Also accept Bearer token (used for direct file uploads that bypass
+        # the Vercel proxy — the browser fetches a short-lived upload token
+        # first, then POSTs the file directly to the backend with this header).
+        auth_header = request.headers.get("Authorization", "")
+        if auth_header.startswith("Bearer "):
+            token = auth_header[7:]
+    if not token:
         raise HTTPException(status_code=401, detail="Not authenticated.")
     payload = decode_token(token)
     user_id = int(payload["sub"])

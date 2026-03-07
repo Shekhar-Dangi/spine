@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.database import get_db
 from db.models import InviteCode, User
-from auth.tokens import create_access_token
+from auth.tokens import create_access_token, create_upload_token
 from auth.deps import get_current_user, require_admin
 from config import settings
 
@@ -180,6 +180,13 @@ async def logout(response: Response):
 @router.get("/me", response_model=UserOut)
 async def me(current_user: User = Depends(get_current_user)):
     return current_user
+
+
+@router.get("/upload-token")
+async def get_upload_token(current_user: User = Depends(get_current_user)):
+    """Return a short-lived (5 min) JWT the browser can use as a Bearer token
+    to POST files directly to the backend, bypassing Vercel's 4.5 MB limit."""
+    return {"token": create_upload_token(current_user.id)}
 
 
 @router.post("/register", response_model=UserOut)

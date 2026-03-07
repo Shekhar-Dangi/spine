@@ -3,7 +3,14 @@
  * All endpoints mirror the backend API surface from PLAN.md.
  */
 
-const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+const BASE = process.env.NEXT_PUBLIC_API_URL ?? "";
+
+// When set, file uploads bypass Vercel's 4.5 MB function payload limit by
+// POSTing directly to the backend. All other API calls still go through the
+// Vercel proxy (so cookies work). Set this to your backend's public URL in
+// your Vercel project environment variables, e.g.:
+//   NEXT_PUBLIC_UPLOAD_URL=https://spine-api-prod.azurewebsites.net
+const UPLOAD_BASE = process.env.NEXT_PUBLIC_UPLOAD_URL ?? "";
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
@@ -57,12 +64,31 @@ export const api = {
       }),
     listInvites: () =>
       req<import("@/types").InviteOut[]>("/api/auth/invites"),
+    getUploadToken: () =>
+      req<{ token: string }>("/api/auth/upload-token"),
   },
 
   books: {
-    upload: (file: File) => {
+    upload: async (file: File) => {
       const fd = new FormData();
       fd.append("file", file);
+
+      if (UPLOAD_BASE) {
+        // Direct upload — bypasses Vercel's 4.5 MB function payload limit.
+        // First get a short-lived Bearer token (tiny proxied request, no size issue).
+        const { token } = await req<{ token: string }>("/api/auth/upload-token");
+        const res = await fetch(`${UPLOAD_BASE}/api/books/upload`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}` },
+          body: fd,
+        });
+        if (!res.ok) {
+          const text = await res.text();
+          throw new Error(`API ${res.status}: ${text}`);
+        }
+        return res.json() as Promise<{ book_id: number; status: string }>;
+      }
+
       return req<{ book_id: number; status: string }>("/api/books/upload", {
         method: "POST",
         body: fd,
