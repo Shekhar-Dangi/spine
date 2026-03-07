@@ -37,6 +37,7 @@ class Settings(BaseSettings):
     jwt_secret: str = ""  # overridden post-init from file
     jwt_expire_minutes: int = 43200  # 30 days
     cookie_secure: bool = False  # set True in production via env
+    cookie_samesite: str = "lax"  # set "none" in production (cross-site Vercel→Azure)
     cors_origins: str = "http://localhost:3000"
     # Admin setup key — required to create the first admin account
     setup_key: str = ""

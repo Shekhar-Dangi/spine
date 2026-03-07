@@ -2,9 +2,8 @@ FROM python:3.13-slim
 
 WORKDIR /app
 
-# System deps for PyMuPDF + bcrypt
+# gcc needed for some C-extension builds on slim image
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libmupdf-dev \
     gcc \
     && rm -rf /var/lib/apt/lists/*
 

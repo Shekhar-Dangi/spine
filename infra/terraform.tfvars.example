@@ -1,0 +1,10 @@
+env             = "prod"
+location        = "centralindia"
+subscription_id = "00000000-0000-0000-0000-000000000000"
+frontend_url    = "https://your-app.vercel.app"
+
+# Sensitive — fill in values, never commit this file with real secrets
+# db_password    = "change-me-strong-password"
+# jwt_secret     = "at-least-32-random-chars"
+# setup_key      = "your-admin-setup-key"
+# tavily_api_key = ""

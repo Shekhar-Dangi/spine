@@ -81,7 +81,7 @@ def _set_auth_cookie(response: Response, token: str) -> None:
         key="spine_auth",
         value=token,
         httponly=True,
-        samesite="lax",
+        samesite=settings.cookie_samesite,
         secure=settings.cookie_secure,
         max_age=86400 * 30,
     )
@@ -173,7 +173,7 @@ async def login(body: LoginIn, response: Response, db: AsyncSession = Depends(ge
 
 @router.post("/logout")
 async def logout(response: Response):
-    response.delete_cookie("spine_auth", httponly=True, samesite="lax")
+    response.delete_cookie("spine_auth", httponly=True, samesite=settings.cookie_samesite)
     return {"ok": True}
 
 
