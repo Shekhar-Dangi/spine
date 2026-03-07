@@ -6,14 +6,10 @@ const PUBLIC_PATHS = ["/login", "/register", "/setup"];
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  // Proxy /api/* to FastAPI backend — before any auth check
+  // /api/* is proxied via next.config.ts rewrites (no middleware needed — avoids
+  // Vercel's FUNCTION_PAYLOAD_TOO_LARGE limit on large file uploads)
   if (pathname.startsWith("/api/")) {
-    const backendUrl = process.env.BACKEND_URL ?? "http://localhost:8000";
-    const destination = new URL(
-      pathname + request.nextUrl.search,
-      backendUrl
-    );
-    return NextResponse.rewrite(destination);
+    return NextResponse.next();
   }
 
   // Allow public page routes without auth
