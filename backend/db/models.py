@@ -3,6 +3,7 @@ SQLAlchemy ORM models for Spine V1.
 All tables use integer primary keys + created_at timestamps.
 """
 import enum
+import json
 from datetime import datetime, timezone
 
 from pgvector.sqlalchemy import Vector
@@ -43,11 +44,11 @@ class BookFormat(str, enum.Enum):
 
 
 class IngestStatus(str, enum.Enum):
-    UPLOADED = "uploaded"          # file saved, not yet parsed
-    PARSING = "parsing"            # extracting text + TOC
-    PENDING_TOC_REVIEW = "pending_toc_review"  # awaiting user confirmation
-    INGESTING = "ingesting"        # chunking + embedding in progress
-    READY = "ready"                # fully ready for use
+    UPLOADED = "uploaded"
+    PARSING = "parsing"
+    PENDING_TOC_REVIEW = "pending_toc_review"
+    INGESTING = "ingesting"
+    READY = "ready"
     FAILED = "failed"
 
 
@@ -124,30 +125,34 @@ class Book(Base):
         Index("ix_books_user_id", "user_id"),
     )
 
-    id: Mapped[int] = mapped_column(
-        Integer, primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     title: Mapped[str] = mapped_column(String(512), nullable=False)
     author: Mapped[str | None] = mapped_column(String(256))
-    format: Mapped[BookFormat] = mapped_column(
-        Enum(BookFormat), nullable=False)
+    format: Mapped[BookFormat] = mapped_column(Enum(BookFormat), nullable=False)
     file_path: Mapped[str] = mapped_column(String(1024), nullable=False)
     page_count: Mapped[int | None] = mapped_column(Integer)
     ingest_status: Mapped[IngestStatus] = mapped_column(
         Enum(IngestStatus), nullable=False, default=IngestStatus.UPLOADED
     )
     ingest_error: Mapped[str | None] = mapped_column(Text)
-    ingest_quality_json: Mapped[str | None] = mapped_column(
-        Text)  # JSON warnings
+    ingest_quality_json: Mapped[str | None] = mapped_column(Text)
+    # Which ModelProfile was used to embed this book's chunks.
+    # Must use the same model/dim for query embedding during retrieval.
+    embedding_profile_id: Mapped[int | None] = mapped_column(
+        ForeignKey("model_profiles.id", ondelete="SET NULL"), nullable=True
+    )
     user_id: Mapped[int | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=_now)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_now, onupdate=_now
     )
 
     user: Mapped["User | None"] = relationship(back_populates="books")
+    embedding_profile: Mapped["ModelProfile | None"] = relationship(
+        foreign_keys=[embedding_profile_id]
+    )
     chapters: Mapped[list["Chapter"]] = relationship(
         back_populates="book", cascade="all, delete-orphan"
     )
@@ -179,17 +184,13 @@ class Chapter(Base):
         Index("ix_chapters_book_id", "book_id"),
     )
 
-    id: Mapped[int] = mapped_column(
-        Integer, primary_key=True, autoincrement=True)
-    book_id: Mapped[int] = mapped_column(
-        ForeignKey("books.id"), nullable=False)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    book_id: Mapped[int] = mapped_column(ForeignKey("books.id"), nullable=False)
     chapter_index: Mapped[int] = mapped_column(Integer, nullable=False)
     title: Mapped[str] = mapped_column(String(512), nullable=False)
-    start_page: Mapped[int | None] = mapped_column(
-        Integer)  # PDF page (0-indexed)
+    start_page: Mapped[int | None] = mapped_column(Integer)
     end_page: Mapped[int | None] = mapped_column(Integer)
-    start_anchor: Mapped[str | None] = mapped_column(
-        String(256))  # EPUB anchor
+    start_anchor: Mapped[str | None] = mapped_column(String(256))
     end_anchor: Mapped[str | None] = mapped_column(String(256))
     token_estimate: Mapped[int | None] = mapped_column(Integer)
     confirmed: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -210,8 +211,6 @@ class Chapter(Base):
 # Chunk
 # ---------------------------------------------------------------------------
 
-EMBEDDING_DIM = 384
-
 
 class Chunk(Base):
     __tablename__ = "chunks"
@@ -220,17 +219,16 @@ class Chunk(Base):
         Index("ix_chunks_chapter_id", "chapter_id"),
     )
 
-    id: Mapped[int] = mapped_column(
-        Integer, primary_key=True, autoincrement=True)
-    book_id: Mapped[int] = mapped_column(
-        ForeignKey("books.id"), nullable=False)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    book_id: Mapped[int] = mapped_column(ForeignKey("books.id"), nullable=False)
     chapter_id: Mapped[int | None] = mapped_column(ForeignKey("chapters.id"))
     text: Mapped[str] = mapped_column(Text, nullable=False)
-    anchor: Mapped[str | None] = mapped_column(
-        String(256))  # page:offset or epub id
-    embedding_id: Mapped[str | None] = mapped_column(
-        String(128))  # legacy ChromaDB doc id, kept for compatibility
-    embedding = mapped_column(Vector(EMBEDDING_DIM), nullable=True)
+    anchor: Mapped[str | None] = mapped_column(String(256))
+    embedding_id: Mapped[str | None] = mapped_column(String(128))
+    # Variable-dimension vector — dimension depends on user's chosen embedding model.
+    # No fixed dim allows any provider model (1024d, 1536d, 3072d, etc.)
+    # Full-scan cosine similarity is fine for book-sized chunk sets.
+    embedding = mapped_column(Vector(), nullable=True)
 
     book: Mapped["Book"] = relationship(back_populates="chunks")
     chapter: Mapped["Chapter | None"] = relationship(back_populates="chunks")
@@ -245,18 +243,13 @@ class ChapterExplain(Base):
     __tablename__ = "chapter_explains"
     __table_args__ = (UniqueConstraint("chapter_id", "mode"),)
 
-    id: Mapped[int] = mapped_column(
-        Integer, primary_key=True, autoincrement=True)
-    book_id: Mapped[int] = mapped_column(
-        ForeignKey("books.id"), nullable=False)
-    chapter_id: Mapped[int] = mapped_column(
-        ForeignKey("chapters.id"), nullable=False
-    )
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    book_id: Mapped[int] = mapped_column(ForeignKey("books.id"), nullable=False)
+    chapter_id: Mapped[int] = mapped_column(ForeignKey("chapters.id"), nullable=False)
     mode: Mapped[str] = mapped_column(String(32), nullable=False, default="story")
     content: Mapped[str] = mapped_column(Text, nullable=False)
     is_complete: Mapped[bool] = mapped_column(Boolean, default=False)
-    generated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=_now)
+    generated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
     book: Mapped["Book"] = relationship(back_populates="chapter_explains")
     chapter: Mapped["Chapter"] = relationship(back_populates="chapter_explains")
@@ -270,14 +263,10 @@ class ChapterExplain(Base):
 class Dossier(Base):
     __tablename__ = "dossiers"
 
-    id: Mapped[int] = mapped_column(
-        Integer, primary_key=True, autoincrement=True)
-    book_id: Mapped[int] = mapped_column(
-        ForeignKey("books.id"), nullable=False, unique=True
-    )
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    book_id: Mapped[int] = mapped_column(ForeignKey("books.id"), nullable=False, unique=True)
     version: Mapped[int] = mapped_column(Integer, default=1)
-    generated_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True))
+    generated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     book: Mapped["Book"] = relationship(back_populates="dossier")
     sections: Mapped[list["DossierSection"]] = relationship(
@@ -288,31 +277,25 @@ class Dossier(Base):
 class DossierSection(Base):
     __tablename__ = "dossier_sections"
 
-    id: Mapped[int] = mapped_column(
-        Integer, primary_key=True, autoincrement=True)
-    dossier_id: Mapped[int] = mapped_column(
-        ForeignKey("dossiers.id"), nullable=False)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    dossier_id: Mapped[int] = mapped_column(ForeignKey("dossiers.id"), nullable=False)
     section_type: Mapped[str] = mapped_column(String(64), nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
-    citations_json: Mapped[str | None] = mapped_column(
-        Text)  # JSON list of Citation
+    citations_json: Mapped[str | None] = mapped_column(Text)
 
     dossier: Mapped["Dossier"] = relationship(back_populates="sections")
 
 
 # ---------------------------------------------------------------------------
-# Citation (inline, stored as JSON in parent rows — but also standalone table
-# for query/audit purposes)
+# Citation
 # ---------------------------------------------------------------------------
 
 
 class Citation(Base):
     __tablename__ = "citations"
 
-    id: Mapped[int] = mapped_column(
-        Integer, primary_key=True, autoincrement=True)
-    source_type: Mapped[SourceType] = mapped_column(
-        Enum(SourceType), nullable=False)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    source_type: Mapped[SourceType] = mapped_column(Enum(SourceType), nullable=False)
     source_ref: Mapped[str | None] = mapped_column(String(512))
     anchor_or_url: Mapped[str | None] = mapped_column(String(1024))
     confidence: Mapped[float | None] = mapped_column(Float)
@@ -326,12 +309,9 @@ class Citation(Base):
 class Conversation(Base):
     __tablename__ = "conversations"
 
-    id: Mapped[int] = mapped_column(
-        Integer, primary_key=True, autoincrement=True)
-    book_id: Mapped[int] = mapped_column(
-        ForeignKey("books.id"), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=_now)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    book_id: Mapped[int] = mapped_column(ForeignKey("books.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
     book: Mapped["Book"] = relationship(back_populates="conversations")
     messages: Mapped[list["Message"]] = relationship(
@@ -345,20 +325,16 @@ class Message(Base):
         Index("ix_messages_conversation_id", "conversation_id"),
     )
 
-    id: Mapped[int] = mapped_column(
-        Integer, primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     conversation_id: Mapped[int] = mapped_column(
         ForeignKey("conversations.id"), nullable=False
     )
     chapter_id: Mapped[int | None] = mapped_column(ForeignKey("chapters.id"))
-    role: Mapped[MessageRole] = mapped_column(
-        Enum(MessageRole), nullable=False)
+    role: Mapped[MessageRole] = mapped_column(Enum(MessageRole), nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=_now)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
-    conversation: Mapped["Conversation"] = relationship(
-        back_populates="messages")
+    conversation: Mapped["Conversation"] = relationship(back_populates="messages")
 
 
 # ---------------------------------------------------------------------------
@@ -403,17 +379,12 @@ class ExplainMessage(Base):
 class ChapterMap(Base):
     __tablename__ = "chapter_maps"
 
-    id: Mapped[int] = mapped_column(
-        Integer, primary_key=True, autoincrement=True)
-    book_id: Mapped[int] = mapped_column(
-        ForeignKey("books.id"), nullable=False)
-    chapter_id: Mapped[int] = mapped_column(
-        ForeignKey("chapters.id"), nullable=False, unique=True
-    )
-    nodes_json: Mapped[str] = mapped_column(Text, nullable=False)  # JSON array
-    edges_json: Mapped[str] = mapped_column(Text, nullable=False)  # JSON array
-    generated_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True))
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    book_id: Mapped[int] = mapped_column(ForeignKey("books.id"), nullable=False)
+    chapter_id: Mapped[int] = mapped_column(ForeignKey("chapters.id"), nullable=False, unique=True)
+    nodes_json: Mapped[str] = mapped_column(Text, nullable=False)
+    edges_json: Mapped[str] = mapped_column(Text, nullable=False)
+    generated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     book: Mapped["Book"] = relationship(back_populates="chapter_maps")
     chapter: Mapped["Chapter"] = relationship(back_populates="chapter_map")
@@ -423,6 +394,9 @@ class ChapterMap(Base):
 # ModelProfile — per-user API key profiles
 # ---------------------------------------------------------------------------
 
+# Valid capability strings. Extensible — add more as features are built.
+VALID_CAPABILITIES = frozenset({"chat", "embedding"})
+
 
 class ModelProfile(Base):
     __tablename__ = "model_profiles"
@@ -431,25 +405,34 @@ class ModelProfile(Base):
         Index("ix_model_profiles_user_id", "user_id"),
     )
 
-    id: Mapped[int] = mapped_column(
-        Integer, primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
     name: Mapped[str] = mapped_column(String(128), nullable=False)
-    provider_type: Mapped[ProviderType] = mapped_column(
-        Enum(ProviderType), nullable=False
-    )
-    key_ref: Mapped[str] = mapped_column(
-        String(512), nullable=False)  # encrypted blob
-    base_url: Mapped[str | None] = mapped_column(
-        String(512))  # OpenRouter only
-    model: Mapped[str] = mapped_column(String(256), nullable=False)  # single model string
+    provider_type: Mapped[ProviderType] = mapped_column(Enum(ProviderType), nullable=False)
+    key_ref: Mapped[str] = mapped_column(String(512), nullable=False)
+    base_url: Mapped[str | None] = mapped_column(String(512))
+    model: Mapped[str] = mapped_column(String(256), nullable=False)
     active: Mapped[bool] = mapped_column(Boolean, default=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=_now)
+    # JSON array of capability strings, e.g. '["chat"]' or '["chat","embedding"]'
+    capabilities_json: Mapped[str] = mapped_column(Text, nullable=False, default='["chat"]')
+    # Dimension of vectors this model produces. Required when "embedding" in capabilities.
+    embedding_dim: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
     user: Mapped["User"] = relationship(back_populates="model_profiles")
+
+    @property
+    def capabilities(self) -> list[str]:
+        return json.loads(self.capabilities_json)
+
+    @capabilities.setter
+    def capabilities(self, value: list[str]) -> None:
+        self.capabilities_json = json.dumps(value)
+
+    def has_capability(self, cap: str) -> bool:
+        return cap in self.capabilities
 
 
 # ---------------------------------------------------------------------------
@@ -457,8 +440,19 @@ class ModelProfile(Base):
 # If profile_id is NULL the system falls back to the active profile.
 # ---------------------------------------------------------------------------
 
-# Canonical routing task names (also used as valid values for task_name PK)
-ROUTING_TASKS = ("dossier", "explain", "qa", "map_extract", "toc_extract")
+# Canonical routing task names.
+# "embed" requires an embedding-capable profile; all others require chat-capable.
+ROUTING_TASKS = ("dossier", "explain", "qa", "map_extract", "toc_extract", "embed")
+
+# Which capability each task requires
+TASK_REQUIRED_CAPABILITY: dict[str, str] = {
+    "dossier": "chat",
+    "explain": "chat",
+    "qa": "chat",
+    "map_extract": "chat",
+    "toc_extract": "chat",
+    "embed": "embedding",
+}
 
 
 class TaskProviderMapping(Base):

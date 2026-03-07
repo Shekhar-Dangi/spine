@@ -1,8 +1,8 @@
 """
-Ingestion service — full Phase 3 implementation.
+Ingestion service.
 
 parse_book()    → parse PDF/EPUB, extract TOC, create draft chapters
-confirm_toc()   → user-confirmed chapters → chunk → embed → pgvector → READY
+confirm_toc()   → user-confirmed chapters → chunk → embed via API → pgvector → READY
 delete_book_artefacts() → hard-delete all data for a book
 """
 import asyncio
@@ -16,7 +16,7 @@ from sqlalchemy import delete as sql_delete, select, update as sql_update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import settings
-from db.models import Book, BookFormat, Chapter, ChapterExplain, ChapterMap, Chunk, IngestStatus
+from db.models import Book, BookFormat, Chapter, ChapterExplain, ChapterMap, Chunk, Dossier, IngestStatus
 
 
 # ---------------------------------------------------------------------------
@@ -34,15 +34,12 @@ def _pdf_toc(file_path: str) -> tuple[list[dict], int]:
     page_count = len(doc)
     toc = doc.get_toc()  # [[level, title, page], ...]
 
-    # Keep only level-1 entries (top-level chapters)
     top = [(title.strip(), max(0, page - 1))
            for level, title, page in toc if level == 1 and title.strip()]
 
-    # Fallback: heading heuristic — scan first 80 pages for large bold text
     if not top:
         top = _pdf_heading_fallback(doc)
 
-    # Last resort: treat entire book as one chapter
     if not top:
         doc.close()
         return [{"index": 0, "title": "Full Book", "start_page": 0, "end_page": page_count - 1,
@@ -71,15 +68,12 @@ def _pdf_heading_fallback(doc: fitz.Document) -> list[tuple[str, int]]:
         for block in doc[page_num].get_text("dict")["blocks"]:
             for line in block.get("lines", []):
                 for span in line.get("spans", []):
-                    size_counts[span["size"]] = size_counts.get(
-                        span["size"], 0) + 1
+                    size_counts[span["size"]] = size_counts.get(span["size"], 0) + 1
 
     if not size_counts:
         return []
 
-    # Heading size = top ~15% of font sizes by frequency-weighted rank
-    body_size = sorted(size_counts.keys(),
-                       key=lambda s: size_counts[s], reverse=True)[0]
+    body_size = sorted(size_counts.keys(), key=lambda s: size_counts[s], reverse=True)[0]
     heading_threshold = body_size * 1.15
 
     headings: list[tuple[str, int]] = []
@@ -99,13 +93,12 @@ def _pdf_heading_fallback(doc: fitz.Document) -> list[tuple[str, int]]:
                     seen.add(title)
                     headings.append((title, page_num))
 
-    return headings[:80]  # cap to avoid noise
+    return headings[:80]
 
 
 def _pdf_chapter_text(file_path: str, start_page: int, end_page: int) -> str:
     doc = fitz.open(file_path)
-    pages = [doc[p].get_text() for p in range(
-        start_page, min(end_page + 1, len(doc)))]
+    pages = [doc[p].get_text() for p in range(start_page, min(end_page + 1, len(doc)))]
     doc.close()
     return "\n\n".join(pages)
 
@@ -154,7 +147,6 @@ def _epub_toc(file_path: str) -> tuple[list[dict], int]:
             for i, link in enumerate(toc_links)
         ]
     else:
-        # Fallback: spine items
         spine_ids = [sid for sid, _ in ebook.spine]
         chapters = [
             {
@@ -181,11 +173,8 @@ def _epub_chapter_text(file_path: str, start_anchor: str) -> str:
         return ""
 
     raw = item.get_content().decode("utf-8", errors="ignore")
-    # Strip HTML tags and decode common entities
-    text = re.sub(r"<style[^>]*>.*?</style>", " ",
-                  raw, flags=re.DOTALL | re.IGNORECASE)
-    text = re.sub(r"<script[^>]*>.*?</script>", " ",
-                  text, flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(r"<style[^>]*>.*?</style>", " ", raw, flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(r"<script[^>]*>.*?</script>", " ", text, flags=re.DOTALL | re.IGNORECASE)
     text = re.sub(r"<[^>]+>", " ", text)
     text = re.sub(r"&nbsp;", " ", text)
     text = re.sub(r"&amp;", "&", text)
@@ -202,11 +191,7 @@ def _epub_chapter_text(file_path: str, start_anchor: str) -> str:
 
 
 def _chunk_text(text: str, max_words: int = 700, overlap_words: int = 80) -> list[str]:
-    """
-    Split text into chunks with overlap.
-    Splits on double-newlines (paragraphs) where possible,
-    then by word count.
-    """
+    """Split text into chunks with overlap."""
     paras = [p.strip() for p in re.split(r"\n{2,}", text) if p.strip()]
     if not paras:
         return [text.strip()] if text.strip() else []
@@ -221,7 +206,6 @@ def _chunk_text(text: str, max_words: int = 700, overlap_words: int = 80) -> lis
             chunk = " ".join(current)
             if chunk.strip():
                 chunks.append(chunk)
-            # Keep overlap from end of current chunk
             overlap_text = " ".join(" ".join(current).split()[-overlap_words:])
             current = [overlap_text, para] if overlap_text else [para]
             current_words = len(" ".join(current).split())
@@ -292,11 +276,14 @@ async def confirm_toc(
     book_id: int,
     chapters: list[dict],
     db: AsyncSession,
+    user_id: int,
 ) -> None:
     """
-    Accept user-confirmed chapters → chunk → embed locally → pgvector → READY.
-    Embedding uses fastembed (local, free) — no provider/API key needed.
+    Accept user-confirmed chapters → chunk → embed via API → pgvector → READY.
+    Requires the user to have an embedding-capable profile configured.
     """
+    from providers.registry import get_embedding_provider_for_user
+
     book = await db.get(Book, book_id)
     if book is None:
         return
@@ -305,6 +292,9 @@ async def confirm_toc(
     await db.commit()
 
     try:
+        # Resolve embedding provider before doing expensive work
+        embed_provider = await get_embedding_provider_for_user(db, user_id)
+
         # Remove all draft chapters for this book
         existing = (await db.execute(select(Chapter).where(Chapter.book_id == book_id))).scalars().all()
         for ch in existing:
@@ -330,9 +320,8 @@ async def confirm_toc(
                 confirmed=True,
             )
             db.add(chapter)
-            await db.flush()  # obtain chapter.id
+            await db.flush()
 
-            # Extract chapter text (run sync file I/O off the event loop)
             if book.format == BookFormat.PDF:
                 text = await asyncio.to_thread(
                     _pdf_chapter_text,
@@ -350,15 +339,13 @@ async def confirm_toc(
             word_count = len(text.split())
             if word_count < 50:
                 quality_warnings.append(
-                    f"Chapter '{ch_data['title']}' has very low text ({word_count} words) — may be image-based or a cover page."
+                    f"Chapter '{ch_data['title']}' has very low text ({word_count} words) "
+                    "— may be image-based or a cover page."
                 )
 
-            # Persist text file
-            (parsed_dir /
-             f"chapter_{ch_data['index']}.txt").write_text(text, encoding="utf-8")
+            (parsed_dir / f"chapter_{ch_data['index']}.txt").write_text(text, encoding="utf-8")
             chapter.token_estimate = word_count * 4 // 3
 
-            # Chunk
             raw_chunks = _chunk_text(text)
             if not raw_chunks:
                 raw_chunks = [text[:3000]] if text.strip() else []
@@ -383,13 +370,12 @@ async def confirm_toc(
 
         await db.commit()
 
-        # Embed locally and store vectors in pgvector in batches
+        # Embed via API and store vectors in pgvector in batches
         if all_texts:
-            from services.embedder import embed_texts as local_embed
             batch = 100
             for i in range(0, len(all_texts), batch):
                 batch_texts = all_texts[i: i + batch]
-                embeddings = await asyncio.to_thread(local_embed, batch_texts)
+                embeddings = await embed_provider.embed_texts(batch_texts)
                 batch_rows = all_chunk_rows[i: i + batch]
                 for row, vec in zip(batch_rows, embeddings):
                     await db.execute(
@@ -398,6 +384,31 @@ async def confirm_toc(
                         .values(embedding=vec)
                     )
             await db.commit()
+
+        # Record which profile was used so retrieval uses the same model
+        from sqlalchemy import select as sa_select
+        from db.models import TaskProviderMapping, ModelProfile
+        mapping_result = await db.execute(
+            sa_select(TaskProviderMapping).where(
+                TaskProviderMapping.user_id == user_id,
+                TaskProviderMapping.task_name == "embed",
+            )
+        )
+        mapping = mapping_result.scalar_one_or_none()
+        if mapping and mapping.profile_id:
+            book.embedding_profile_id = mapping.profile_id
+        else:
+            # Find the first active embedding-capable profile that was used
+            profile_result = await db.execute(
+                sa_select(ModelProfile).where(
+                    ModelProfile.user_id == user_id,
+                    ModelProfile.active == True,
+                ).order_by(ModelProfile.created_at)
+            )
+            for profile in profile_result.scalars().all():
+                if profile.has_capability("embedding"):
+                    book.embedding_profile_id = profile.id
+                    break
 
         book.ingest_quality_json = json.dumps({"warnings": quality_warnings})
         book.ingest_status = IngestStatus.READY
@@ -410,12 +421,13 @@ async def confirm_toc(
         raise
 
 
-async def retry_embed(book_id: int, db: AsyncSession) -> None:
+async def retry_embed(book_id: int, db: AsyncSession, user_id: int) -> None:
     """
     Re-run only the embedding step for a FAILED book.
-    Chunks are already in the DB from the previous confirm_toc() run —
-    this just re-embeds and stores vectors in pgvector.
+    Chunks are already in the DB — this just re-embeds and stores vectors.
     """
+    from providers.registry import get_embedding_provider_for_user
+
     book = await db.get(Book, book_id)
     if book is None:
         return
@@ -425,14 +437,15 @@ async def retry_embed(book_id: int, db: AsyncSession) -> None:
     await db.commit()
 
     try:
+        embed_provider = await get_embedding_provider_for_user(db, user_id)
+
         result = await db.execute(select(Chunk).where(Chunk.book_id == book_id).order_by(Chunk.id))
         chunks = result.scalars().all()
 
         if not chunks:
             raise ValueError(
-                "No chunks found in database — the book may need to be re-uploaded and re-confirmed.")
-
-        from services.embedder import embed_texts as local_embed
+                "No chunks found — the book may need to be re-uploaded and re-confirmed."
+            )
 
         all_texts = [c.text for c in chunks]
         all_ids = [c.id for c in chunks]
@@ -440,7 +453,7 @@ async def retry_embed(book_id: int, db: AsyncSession) -> None:
         batch = 100
         for i in range(0, len(all_texts), batch):
             batch_texts = all_texts[i: i + batch]
-            embeddings = await asyncio.to_thread(local_embed, batch_texts)
+            embeddings = await embed_provider.embed_texts(batch_texts)
             batch_ids = all_ids[i: i + batch]
             for chunk_id, vec in zip(batch_ids, embeddings):
                 await db.execute(
@@ -449,6 +462,30 @@ async def retry_embed(book_id: int, db: AsyncSession) -> None:
                     .values(embedding=vec)
                 )
         await db.commit()
+
+        # Update embedding_profile_id to whichever profile was used
+        from sqlalchemy import select as sa_select
+        from db.models import TaskProviderMapping, ModelProfile
+        mapping_result = await db.execute(
+            sa_select(TaskProviderMapping).where(
+                TaskProviderMapping.user_id == user_id,
+                TaskProviderMapping.task_name == "embed",
+            )
+        )
+        mapping = mapping_result.scalar_one_or_none()
+        if mapping and mapping.profile_id:
+            book.embedding_profile_id = mapping.profile_id
+        else:
+            profile_result = await db.execute(
+                sa_select(ModelProfile).where(
+                    ModelProfile.user_id == user_id,
+                    ModelProfile.active == True,
+                ).order_by(ModelProfile.created_at)
+            )
+            for profile in profile_result.scalars().all():
+                if profile.has_capability("embedding"):
+                    book.embedding_profile_id = profile.id
+                    break
 
         book.ingest_status = IngestStatus.READY
         book.ingest_error = None
@@ -463,29 +500,25 @@ async def retry_embed(book_id: int, db: AsyncSession) -> None:
 
 async def reset_and_reparse(book_id: int, db: AsyncSession) -> None:
     """
-    Wipe all derived data for a book (chunks, chapters, explains, maps,
-    parsed text files) and re-run parse_book() so the user can
-    review and confirm the TOC again.
+    Wipe all derived data for a book and re-run parse_book() so the user
+    can review and confirm the TOC again.
     """
-    # --- Parsed text files ---------------------------------------------------
     parsed_dir = Path(settings.parsed_path) / str(book_id)
     if parsed_dir.exists():
         shutil.rmtree(parsed_dir)
 
-    # --- Bulk-delete derived DB rows (order matters for FK integrity) ---------
     await db.execute(sql_delete(ChapterMap).where(ChapterMap.book_id == book_id))
     await db.execute(sql_delete(ChapterExplain).where(ChapterExplain.book_id == book_id))
     await db.execute(sql_delete(Chunk).where(Chunk.book_id == book_id))
     await db.execute(sql_delete(Chapter).where(Chapter.book_id == book_id))
+    await db.execute(sql_delete(Dossier).where(Dossier.book_id == book_id))
     await db.commit()
 
-    # --- Re-parse (sets status PARSING → PENDING_TOC_REVIEW) -----------------
     await parse_book(book_id, db)
 
 
 async def delete_book_artefacts(book_id: int, file_path: str, db: AsyncSession) -> None:
     """Hard-delete: file, parsed artefacts, all DB rows."""
-    # Filesystem
     upload = Path(file_path)
     if upload.exists():
         upload.unlink()
@@ -494,7 +527,6 @@ async def delete_book_artefacts(book_id: int, file_path: str, db: AsyncSession) 
     if parsed_dir.exists():
         shutil.rmtree(parsed_dir)
 
-    # DB (cascade handles children)
     book = await db.get(Book, book_id)
     if book:
         await db.delete(book)

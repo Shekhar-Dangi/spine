@@ -29,14 +29,17 @@ async def ask(
     current_user: User = Depends(get_current_user),
 ):
     book = await db.get(Book, book_id)
-    if not book or book.ingest_status != IngestStatus.READY:
+    if not book or book.user_id != current_user.id:
+        raise HTTPException(status_code=404, detail="Book not found.")
+    if book.ingest_status != IngestStatus.READY:
         raise HTTPException(status_code=409, detail="Book is not ready.")
 
     if not body.question.strip():
         raise HTTPException(status_code=422, detail="Question cannot be empty.")
 
-    from providers.registry import get_provider_for_task
-    provider = await get_provider_for_task("qa", db, current_user.id)
+    from providers.registry import get_provider_for_task, get_embedding_provider_for_user
+    chat_provider = await get_provider_for_task("qa", db, current_user.id)
+    embed_provider = await get_embedding_provider_for_user(db, current_user.id)
 
     async def event_stream():
         async for delta in qa_svc.stream_qa(
@@ -45,7 +48,8 @@ async def ask(
             body.selected_text,
             body.question,
             db,
-            provider,
+            chat_provider,
+            embed_provider,
         ):
             safe = delta.replace("\n", "\\n")
             yield f"data: {safe}\n\n"
@@ -61,6 +65,10 @@ async def get_conversation(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    book = await db.get(Book, book_id)
+    if not book or book.user_id != current_user.id:
+        raise HTTPException(status_code=404, detail="Book not found.")
+
     result = await db.execute(
         select(Conversation).where(Conversation.book_id == book_id)
     )

@@ -220,9 +220,11 @@ async def confirm_toc(
 
     chapters_data = [c.model_dump() for c in body.chapters]
 
+    user_id = current_user.id
+
     async def _confirm_task():
         async with AsyncSessionLocal() as bg_db:
-            await ingest_svc.confirm_toc(book_id, chapters_data, bg_db)
+            await ingest_svc.confirm_toc(book_id, chapters_data, bg_db, user_id)
 
     background_tasks.add_task(_confirm_task)
 
@@ -250,9 +252,11 @@ async def retry_embed(
             detail=f"Book is not in a failed state (current status: {book.ingest_status}).",
         )
 
+    retry_user_id = current_user.id
+
     async def _task():
         async with AsyncSessionLocal() as bg_db:
-            await ingest_svc.retry_embed(book_id, bg_db)
+            await ingest_svc.retry_embed(book_id, bg_db, retry_user_id)
 
     background_tasks.add_task(_task)
 

@@ -94,6 +94,8 @@ export interface ChapterMap {
   generated_at: string | null;
 }
 
+export type ModelCapability = "chat" | "embedding";
+
 export interface ModelProfile {
   id: number;
   name: string;
@@ -101,6 +103,8 @@ export interface ModelProfile {
   base_url: string | null;
   model: string;
   active: boolean;
+  capabilities: ModelCapability[];
+  embedding_dim: number | null;
 }
 
 /** Routing task names matching backend ROUTING_TASKS tuple. */
@@ -109,9 +113,20 @@ export type RoutingTask =
   | "explain"
   | "qa"
   | "map_extract"
-  | "toc_extract";
+  | "toc_extract"
+  | "embed";
 
-/** task_name → profile_id (null = use active profile fallback). */
+/** Which capability each task requires. */
+export const TASK_REQUIRED_CAPABILITY: Record<RoutingTask, ModelCapability> = {
+  dossier: "chat",
+  explain: "chat",
+  qa: "chat",
+  map_extract: "chat",
+  toc_extract: "chat",
+  embed: "embedding",
+};
+
+/** task_name → profile_id (null = use active/fallback profile). */
 export type TaskMapping = Record<RoutingTask, number | null>;
 
 export interface ConversationMessage {

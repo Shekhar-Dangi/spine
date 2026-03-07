@@ -1,5 +1,6 @@
 """
 OpenAI adapter — also used for OpenRouter (same SDK, different base_url).
+Handles both chat completions and embeddings via the openai library.
 """
 from typing import AsyncIterator
 
@@ -27,9 +28,7 @@ class OpenAIAdapter(BaseProvider):
         )
 
     def _token_limit_kwargs(self, max_tokens: int) -> dict:
-        """Return the correct token-limit param for the configured model."""
-        key = "max_tokens" if _uses_legacy_max_tokens(
-            self.config.model) else "max_completion_tokens"
+        key = "max_tokens" if _uses_legacy_max_tokens(self.config.model) else "max_completion_tokens"
         return {key: max_tokens}
 
     async def generate_text(
@@ -65,9 +64,26 @@ class OpenAIAdapter(BaseProvider):
 
         return _stream_generator()
 
+    async def embed_texts(self, texts: list[str]) -> list[list[float]]:
+        """
+        Embed a batch of texts using the configured model.
+        Works with OpenAI embedding models (text-embedding-3-small, etc.)
+        and OpenRouter embedding models (thenlper/gte-large, etc.).
+        """
+        response = await self._client.embeddings.create(
+            model=self.config.model,
+            input=texts,
+        )
+        # API guarantees same order as input
+        return [item.embedding for item in response.data]
+
     async def health_check(self) -> bool:
+        """Test chat capability by attempting a minimal completion with the configured model."""
         try:
-            await self._client.models.list()
+            await self._client.chat.completions.create(
+                model=self.config.model,
+                messages=[{"role": "user", "content": "hi"}],
+            )
             return True
         except Exception:
             return False

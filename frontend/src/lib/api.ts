@@ -187,7 +187,7 @@ export const api = {
 
   providers: {
     capabilities: () =>
-      req<{ tavily_available: boolean }>("/api/providers/capabilities"),
+      req<{ tavily_available: boolean; valid_capabilities: string[] }>("/api/providers/capabilities"),
     list: () =>
       req<import("@/types").ModelProfile[]>("/api/providers/profiles"),
     create: (body: {
@@ -196,6 +196,8 @@ export const api = {
       api_key: string;
       base_url?: string;
       model: string;
+      capabilities: import("@/types").ModelCapability[];
+      embedding_dim?: number;
     }) =>
       req<import("@/types").ModelProfile>("/api/providers/profiles", {
         method: "POST",
@@ -210,6 +212,8 @@ export const api = {
         base_url?: string;
         model?: string;
         active?: boolean;
+        capabilities?: import("@/types").ModelCapability[];
+        embedding_dim?: number;
       },
     ) =>
       req<import("@/types").ModelProfile>(
@@ -225,7 +229,11 @@ export const api = {
         method: "DELETE",
       }),
     test: (profileId: number) =>
-      req<{ profile_id: number; reachable: boolean }>(
+      req<{
+        profile_id: number;
+        reachable: boolean;
+        capabilities_tested: Record<string, boolean | string>;
+      }>(
         `/api/providers/profiles/${profileId}/test`,
         { method: "POST" },
       ),
@@ -275,7 +283,7 @@ export async function streamPost(
       buffer = lines.pop() ?? "";
       for (const line of lines) {
         if (line.startsWith("data: ")) {
-          const data = line.slice(6);
+          const data = line.slice(6).replace(/\\n/g, "\n");
           if (data === "[DONE]") {
             onDone();
             return;
