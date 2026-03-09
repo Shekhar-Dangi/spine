@@ -58,7 +58,7 @@ resource "azurerm_service_plan" "spine" {
   resource_group_name = azurerm_resource_group.spine.name
   location            = azurerm_resource_group.spine.location
   os_type             = "Linux"
-  sku_name            = "B2"
+  sku_name            = "F1"
   tags                = local.common_tags
 }
 
@@ -80,6 +80,7 @@ resource "azurerm_linux_web_app" "backend" {
     }
     # startup.sh: mkdir /home dirs → alembic upgrade head → uvicorn
     app_command_line = "bash startup.sh"
+    always_on        = false
   }
 
   app_settings = {

@@ -312,6 +312,13 @@ export default function ExplainView({ bookId }: Props) {
       if (ms.content) {
         lines.push(SEP, `## DEEP EXPLANATION (${activeMode})`, ms.content, "");
       }
+      if (chatMessages.length > 0) {
+        lines.push(SEP, "## EXPLAIN TAB CHAT");
+        for (const msg of chatMessages) {
+          lines.push(`[${msg.role === "user" ? "User" : "Assistant"}] ${msg.content}`);
+        }
+        lines.push("");
+      }
       if (dossierResult.status === "fulfilled" && dossierResult.value.sections.length > 0) {
         lines.push(SEP, "## BOOK CONTEXT (Pre-read Dossier)");
         for (const s of dossierResult.value.sections) {
