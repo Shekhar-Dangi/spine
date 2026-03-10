@@ -159,6 +159,39 @@ export interface InviteOut {
   used_by_username: string | null;
 }
 
+// ---------------------------------------------------------------------------
+// V2 Knowledge Layer
+// ---------------------------------------------------------------------------
+
+export type NoteOriginType = "standalone" | "passage_anchor" | "explain_turn" | "qa_turn";
+
+export interface Note {
+  id: number;
+  title: string | null;
+  content: string;
+  origin_type: NoteOriginType | null;
+  origin_id: number | null;
+  last_indexed_at: string | null;
+  created_at: string;
+  updated_at: string;
+  /** Only present on GET /api/notes/{id} */
+  links_to?: number[];
+  linked_from?: number[];
+}
+
+export interface SaveNoteResult {
+  id: number;
+  title: string | null;
+  origin_type: string;
+  origin_id: number;
+  created_at: string;
+}
+
+export interface NotesListResponse {
+  notes: Note[];
+  total: number;
+}
+
 /** A suggested chapter entry returned by POST /toc/suggest. */
 export interface SuggestedChapter {
   index: number;

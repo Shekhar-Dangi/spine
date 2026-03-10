@@ -18,6 +18,7 @@ from db.models import (
     IngestStatus, MessageRole, User,
 )
 from services import explain as explain_svc
+from services import notes as notes_svc
 
 router = APIRouter(prefix="/api/books", tags=["explain"])
 
@@ -39,6 +40,10 @@ class ExplainChatMessage(BaseModel):
 class ExplainChatRequest(BaseModel):
     question: str
     explain_content: str
+
+
+class SaveExplainTurnIn(BaseModel):
+    title: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -137,6 +142,45 @@ async def explain_chapter(
             yield f"data: [ERROR] {err}\n\n"
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+@router.post("/{book_id}/chapters/{chapter_id}/explain/messages/{message_id}/save", status_code=201)
+async def save_explain_turn(
+    book_id: int,
+    chapter_id: int,
+    message_id: int,
+    body: SaveExplainTurnIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Save a single Deep Explain chat turn (and its paired question) as a note."""
+    book = await db.get(Book, book_id)
+    if not book or book.user_id != current_user.id:
+        raise HTTPException(status_code=404, detail="Book not found.")
+
+    chapter = await db.get(Chapter, chapter_id)
+    if not chapter or chapter.book_id != book_id:
+        raise HTTPException(status_code=404, detail="Chapter not found.")
+
+    try:
+        note = await notes_svc.save_explain_turn_as_note(
+            message_id=message_id,
+            user_id=current_user.id,
+            title=body.title,
+            db=db,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+
+    return {
+        "id": note.id,
+        "title": note.title,
+        "origin_type": note.origin_type.value,
+        "origin_id": note.origin_id,
+        "created_at": note.created_at.isoformat(),
+    }
 
 
 async def _get_or_create_explain_conv(

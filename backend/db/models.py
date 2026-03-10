@@ -19,6 +19,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
 )
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from db.database import Base
@@ -471,3 +472,339 @@ class TaskProviderMapping(Base):
     )
 
     profile: Mapped["ModelProfile | None"] = relationship()
+
+
+# ---------------------------------------------------------------------------
+# V2 Knowledge Layer — Phase 1
+# ---------------------------------------------------------------------------
+
+
+class NoteOriginType(str, enum.Enum):
+    STANDALONE = "standalone"
+    PASSAGE_ANCHOR = "passage_anchor"
+    EXPLAIN_TURN = "explain_turn"
+    QA_TURN = "qa_turn"
+
+
+class KnowledgeNodeType(str, enum.Enum):
+    CONCEPT = "concept"
+    PERSON = "person"
+    EVENT = "event"
+    PLACE = "place"
+    ERA = "era"
+
+
+class EvidenceSourceType(str, enum.Enum):
+    CHUNK = "chunk"
+    PASSAGE_ANCHOR = "passage_anchor"
+    NOTE = "note"
+    QA_TURN = "qa_turn"
+    EXPLAIN_TURN = "explain_turn"
+
+
+class JobStatus(str, enum.Enum):
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
+class SuggestionStatus(str, enum.Enum):
+    PENDING = "pending"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+    DISMISSED = "dismissed"
+
+
+class SuggestionType(str, enum.Enum):
+    NEW_NODE = "new_node"
+    MERGE_NODE = "merge_node"
+    ALIAS = "alias"
+    NEW_EDGE = "new_edge"
+    HISTORICAL_TAG = "historical_tag"
+
+
+class PassageAnchor(Base):
+    """Stable reference into a chunk: chunk_id + char offset range.
+
+    text_fingerprint stores first 80 + last 80 chars of the selection for
+    validation and future remapping if a book is re-ingested.
+    """
+    __tablename__ = "passage_anchors"
+    __table_args__ = (
+        Index("ix_passage_anchors_user_id", "user_id"),
+        Index("ix_passage_anchors_chunk_id", "chunk_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    chunk_id: Mapped[int] = mapped_column(
+        ForeignKey("chunks.id", ondelete="CASCADE"), nullable=False
+    )
+    char_start: Mapped[int] = mapped_column(Integer, nullable=False)
+    char_end: Mapped[int] = mapped_column(Integer, nullable=False)
+    text_fingerprint: Mapped[str] = mapped_column(Text, nullable=False)
+    selected_text: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+    user: Mapped["User"] = relationship()
+    chunk: Mapped["Chunk"] = relationship()
+
+
+class Note(Base):
+    """User knowledge artifact — standalone or promoted from a source.
+
+    origin_type + origin_id identify the source entity when the note was
+    promoted (not standalone). origin_id is a polymorphic FK validated at
+    the application layer.
+
+    last_indexed_at tracks lazy embedding for retrieval (Phase 2).
+    NULL means the note has not yet been chunked and embedded.
+    """
+    __tablename__ = "notes"
+    __table_args__ = (
+        Index("ix_notes_user_id", "user_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    title: Mapped[str | None] = mapped_column(Text)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    origin_type: Mapped[NoteOriginType | None] = mapped_column(
+        Enum(NoteOriginType, name="note_origin_type"), nullable=True
+    )
+    # Polymorphic FK — points to passage_anchor.id, explain_message.id, or
+    # message.id depending on origin_type. No DB-level constraint.
+    origin_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    last_indexed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, onupdate=_now
+    )
+
+    user: Mapped["User"] = relationship()
+    outgoing_links: Mapped[list["NoteLink"]] = relationship(
+        foreign_keys="NoteLink.from_note_id",
+        back_populates="from_note",
+        cascade="all, delete-orphan",
+    )
+    incoming_links: Mapped[list["NoteLink"]] = relationship(
+        foreign_keys="NoteLink.to_note_id",
+        back_populates="to_note",
+        cascade="all, delete-orphan",
+    )
+
+
+class NoteLink(Base):
+    """Manual backlink between two notes."""
+    __tablename__ = "note_links"
+    __table_args__ = (
+        UniqueConstraint("from_note_id", "to_note_id", name="uq_note_links_pair"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    from_note_id: Mapped[int] = mapped_column(
+        ForeignKey("notes.id", ondelete="CASCADE"), nullable=False
+    )
+    to_note_id: Mapped[int] = mapped_column(
+        ForeignKey("notes.id", ondelete="CASCADE"), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+    from_note: Mapped["Note"] = relationship(
+        foreign_keys=[from_note_id], back_populates="outgoing_links"
+    )
+    to_note: Mapped["Note"] = relationship(
+        foreign_keys=[to_note_id], back_populates="incoming_links"
+    )
+
+
+class KnowledgeNode(Base):
+    """A node in the user's personal knowledge graph.
+
+    metadata JSONB holds optional approximate values such as era ranges or
+    loose geographic regions. Exact dates and coordinates are not required.
+    """
+    __tablename__ = "knowledge_nodes"
+    __table_args__ = (
+        Index("ix_knowledge_nodes_user_id", "user_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    type: Mapped[KnowledgeNodeType] = mapped_column(
+        Enum(KnowledgeNodeType, name="knowledge_node_type"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    aliases: Mapped[list[str]] = mapped_column(
+        ARRAY(Text()), server_default="{}", nullable=False
+    )
+    description: Mapped[str | None] = mapped_column(Text)
+    # 'metadata' is reserved by SQLAlchemy Declarative — use node_metadata as the
+    # Python attribute name while keeping the DB column name as 'metadata'.
+    node_metadata: Mapped[dict] = mapped_column(
+        "metadata", JSONB(), server_default="{}", nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, onupdate=_now
+    )
+
+    user: Mapped["User"] = relationship()
+    outgoing_edges: Mapped[list["KnowledgeEdge"]] = relationship(
+        foreign_keys="KnowledgeEdge.from_node_id",
+        back_populates="from_node",
+        cascade="all, delete-orphan",
+    )
+    incoming_edges: Mapped[list["KnowledgeEdge"]] = relationship(
+        foreign_keys="KnowledgeEdge.to_node_id",
+        back_populates="to_node",
+        cascade="all, delete-orphan",
+    )
+
+
+class KnowledgeEdge(Base):
+    """A directed, evidence-backed relation between two knowledge nodes.
+
+    Every edge must have at least one Evidence row after creation.
+    Enforced at the application layer.
+    """
+    __tablename__ = "knowledge_edges"
+    __table_args__ = (
+        Index("ix_knowledge_edges_user_id", "user_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    from_node_id: Mapped[int] = mapped_column(
+        ForeignKey("knowledge_nodes.id", ondelete="CASCADE"), nullable=False
+    )
+    to_node_id: Mapped[int] = mapped_column(
+        ForeignKey("knowledge_nodes.id", ondelete="CASCADE"), nullable=False
+    )
+    relation: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+    user: Mapped["User"] = relationship()
+    from_node: Mapped["KnowledgeNode"] = relationship(
+        foreign_keys=[from_node_id], back_populates="outgoing_edges"
+    )
+    to_node: Mapped["KnowledgeNode"] = relationship(
+        foreign_keys=[to_node_id], back_populates="incoming_edges"
+    )
+    evidence: Mapped[list["Evidence"]] = relationship(
+        back_populates="edge", cascade="all, delete-orphan"
+    )
+
+
+class Evidence(Base):
+    """Polymorphic source reference backing a knowledge edge.
+
+    source_type determines which table source_id points to:
+      chunk          → chunks.id
+      passage_anchor → passage_anchors.id
+      note           → notes.id
+      qa_turn        → messages.id
+      explain_turn   → explain_messages.id
+    """
+    __tablename__ = "evidence"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    edge_id: Mapped[int] = mapped_column(
+        ForeignKey("knowledge_edges.id", ondelete="CASCADE"), nullable=False
+    )
+    source_type: Mapped[EvidenceSourceType] = mapped_column(
+        Enum(EvidenceSourceType, name="evidence_source_type"), nullable=False
+    )
+    source_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    quote: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+    edge: Mapped["KnowledgeEdge"] = relationship(back_populates="evidence")
+
+
+class ExtractionJob(Base):
+    """Async job that runs LLM extraction on a set of notes.
+
+    Created when a user manually triggers knowledge extraction.
+    The Phase 2 worker picks up pending jobs, calls the LLM, and
+    writes Suggestion rows for the user to review.
+    """
+    __tablename__ = "extraction_jobs"
+    __table_args__ = (
+        Index("ix_extraction_jobs_user_id", "user_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    status: Mapped[JobStatus] = mapped_column(
+        Enum(JobStatus, name="job_status"), nullable=False, default=JobStatus.PENDING
+    )
+    note_ids: Mapped[list[int]] = mapped_column(
+        ARRAY(Integer()), nullable=False
+    )
+    error_message: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    user: Mapped["User"] = relationship()
+    suggestions: Mapped[list["Suggestion"]] = relationship(
+        back_populates="job", cascade="all, delete-orphan"
+    )
+
+
+class Suggestion(Base):
+    """AI-proposed knowledge graph change pending user review.
+
+    payload JSONB shape by type:
+      new_node:       { type, name, aliases, description, metadata }
+      merge_node:     { into_node_id, source_node_name }
+      alias:          { node_id, alias }
+      new_edge:       { from_node_id, to_node_id, relation, evidence_source_ids }
+      historical_tag: { node_id, tag_type, value }
+
+    Status lifecycle:
+      pending  → approved  (written to knowledge graph)
+      pending  → rejected  (soft; can be reconsidered)
+      pending  → dismissed (user explicitly discarded; not shown again)
+    """
+    __tablename__ = "suggestions"
+    __table_args__ = (
+        Index("ix_suggestions_user_status", "user_id", "status"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    job_id: Mapped[int] = mapped_column(
+        ForeignKey("extraction_jobs.id", ondelete="CASCADE"), nullable=False
+    )
+    type: Mapped[SuggestionType] = mapped_column(
+        Enum(SuggestionType, name="suggestion_type"), nullable=False
+    )
+    status: Mapped[SuggestionStatus] = mapped_column(
+        Enum(SuggestionStatus, name="suggestion_status"), nullable=False, default=SuggestionStatus.PENDING
+    )
+    payload: Mapped[dict] = mapped_column(JSONB(), nullable=False)
+    reviewed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+    user: Mapped["User"] = relationship()
+    job: Mapped["ExtractionJob"] = relationship(back_populates="suggestions")

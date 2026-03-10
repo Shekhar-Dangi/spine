@@ -11,7 +11,7 @@ from sqlalchemy import select, update, or_
 from config import settings
 from db.database import AsyncSessionLocal
 from db.models import Book, IngestStatus
-from api import books, dossier, explain, qa, map, providers, auth
+from api import books, dossier, explain, qa, map, providers, auth, notes
 
 log = logging.getLogger(__name__)
 
@@ -65,6 +65,7 @@ app.include_router(explain.router)
 app.include_router(qa.router)
 app.include_router(map.router)
 app.include_router(providers.router)
+app.include_router(notes.router)
 
 
 @app.get("/health")

@@ -47,6 +47,7 @@ interface ModeState {
 }
 
 interface ChatMessage {
+  id?: number;          // present after load from DB; absent for pending/streaming messages
   role: "user" | "assistant";
   content: string;
 }
@@ -681,7 +682,14 @@ export default function ExplainView({ bookId }: Props) {
               </p>
             )}
             {chatMessages.map((msg, i) => (
-              <ChatBubble key={i} role={msg.role} content={msg.content} />
+              <ChatBubble
+                key={msg.id ?? i}
+                role={msg.role}
+                content={msg.content}
+                messageId={msg.id}
+                bookId={bookId}
+                chapterId={activeChapterId ?? undefined}
+              />
             ))}
             {chatPending !== null && (
               <ChatBubble role="user" content={chatPending} />
@@ -744,11 +752,37 @@ function ChatBubble({
   role,
   content,
   streaming,
+  messageId,
+  bookId,
+  chapterId,
 }: {
   role: "user" | "assistant";
   content: string;
   streaming?: boolean;
+  messageId?: number;
+  bookId?: number;
+  chapterId?: number;
 }) {
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [showForm, setShowForm] = useState(false);
+  const [titleInput, setTitleInput] = useState("");
+
+  const handleSave = async () => {
+    if (!messageId || !bookId || !chapterId) return;
+    setSaving(true);
+    try {
+      await api.notes.saveExplainTurn(bookId, chapterId, messageId, titleInput.trim() || undefined);
+      setSaved(true);
+      setShowForm(false);
+      setTimeout(() => setSaved(false), 2500);
+    } catch {
+      // silent
+    } finally {
+      setSaving(false);
+    }
+  };
+
   if (role === "user") {
     return (
       <div className="flex justify-end">
@@ -759,16 +793,62 @@ function ChatBubble({
     );
   }
   return (
-    <div className="flex gap-2.5">
+    <div className="group flex gap-2.5">
       <div className="shrink-0 w-5 h-5 mt-0.5 rounded-full bg-stone-200 dark:bg-stone-700 flex items-center justify-center text-[8px] text-stone-500 dark:text-stone-400 font-bold tracking-wide">
         AI
       </div>
-      <div className="flex-1 text-sm text-stone-700 dark:text-stone-300 leading-7 prose prose-sm prose-stone dark:prose-invert max-w-none">
-        <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
-          {content}
-        </ReactMarkdown>
-        {streaming && (
-          <span className="inline-block w-1.5 h-4 ml-0.5 bg-amber-500 animate-pulse rounded-sm align-middle" />
+      <div className="flex-1 min-w-0">
+        <div className="text-sm text-stone-700 dark:text-stone-300 leading-7 prose prose-sm prose-stone dark:prose-invert max-w-none">
+          <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
+            {content}
+          </ReactMarkdown>
+          {streaming && (
+            <span className="inline-block w-1.5 h-4 ml-0.5 bg-amber-500 animate-pulse rounded-sm align-middle" />
+          )}
+        </div>
+
+        {/* Save button — only for persisted messages with IDs */}
+        {!streaming && messageId && bookId && chapterId && (
+          <div className="mt-1">
+            {saved ? (
+              <span className="text-[11px] text-emerald-600 dark:text-emerald-400">Saved to notes ✓</span>
+            ) : showForm ? (
+              <div className="flex items-center gap-1.5 mt-1">
+                <input
+                  autoFocus
+                  type="text"
+                  value={titleInput}
+                  onChange={(e) => setTitleInput(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") handleSave(); if (e.key === "Escape") setShowForm(false); }}
+                  placeholder="Title (optional)"
+                  className="flex-1 min-w-0 bg-white dark:bg-stone-800 border border-stone-300 dark:border-stone-700 rounded px-2 py-1 text-xs text-stone-900 dark:text-stone-100 placeholder-stone-400 outline-none focus:ring-1 focus:ring-amber-500/40 focus:border-amber-500"
+                />
+                <button
+                  onClick={handleSave}
+                  disabled={saving}
+                  className="px-2.5 py-1 rounded bg-amber-600 hover:bg-amber-700 text-white text-[11px] font-medium disabled:opacity-50 transition-colors"
+                >
+                  {saving ? "…" : "Save"}
+                </button>
+                <button
+                  onClick={() => setShowForm(false)}
+                  className="px-2 py-1 text-[11px] text-stone-400 hover:text-stone-600 dark:hover:text-stone-300 transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => setShowForm(true)}
+                className="opacity-0 group-hover:opacity-100 text-[11px] text-stone-400 dark:text-stone-600 hover:text-amber-600 dark:hover:text-amber-400 transition-all flex items-center gap-1"
+              >
+                <svg className="w-3 h-3" fill="none" viewBox="0 0 16 16" stroke="currentColor" strokeWidth="1.8">
+                  <path d="M3 2h10a1 1 0 0 1 1 1v10.5l-5-2.5-5 2.5V3a1 1 0 0 1 1-1z" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+                Save to notes
+              </button>
+            )}
+          </div>
         )}
       </div>
     </div>

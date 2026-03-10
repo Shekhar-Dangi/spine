@@ -211,6 +211,91 @@ export const api = {
     },
   },
 
+  notes: {
+    list: (params?: { origin_type?: string; search?: string; limit?: number; offset?: number }) => {
+      const qs = new URLSearchParams();
+      if (params?.origin_type) qs.set("origin_type", params.origin_type);
+      if (params?.search) qs.set("search", params.search);
+      if (params?.limit != null) qs.set("limit", String(params.limit));
+      if (params?.offset != null) qs.set("offset", String(params.offset));
+      const q = qs.toString();
+      return req<import("@/types").NotesListResponse>(`/api/notes${q ? `?${q}` : ""}`);
+    },
+    get: (noteId: number) =>
+      req<import("@/types").Note>(`/api/notes/${noteId}`),
+    create: (body: { title?: string; content: string }) =>
+      req<import("@/types").Note>("/api/notes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      }),
+    update: (noteId: number, body: { title?: string; content?: string }) =>
+      req<import("@/types").Note>(`/api/notes/${noteId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      }),
+    delete: (noteId: number) =>
+      req<void>(`/api/notes/${noteId}`, { method: "DELETE" }),
+    addLink: (noteId: number, toNoteId: number) =>
+      req<{ from_note_id: number; to_note_id: number }>(`/api/notes/${noteId}/links`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ to_note_id: toNoteId }),
+      }),
+    removeLink: (noteId: number, toNoteId: number) =>
+      req<void>(`/api/notes/${noteId}/links/${toNoteId}`, { method: "DELETE" }),
+    saveQaTurn: (bookId: number, messageId: number, title?: string) =>
+      req<import("@/types").SaveNoteResult>(
+        `/api/books/${bookId}/qa/messages/${messageId}/save`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ title: title ?? null }),
+        },
+      ),
+    saveMultipleQaTurns: (bookId: number, messageIds: number[], title?: string) =>
+      req<import("@/types").SaveNoteResult>(
+        `/api/books/${bookId}/qa/messages/save-multiple`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ message_ids: messageIds, title: title ?? null }),
+        },
+      ),
+    saveExplainTurn: (bookId: number, chapterId: number, messageId: number, title?: string) =>
+      req<import("@/types").SaveNoteResult>(
+        `/api/books/${bookId}/chapters/${chapterId}/explain/messages/${messageId}/save`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ title: title ?? null }),
+        },
+      ),
+    savePassage: (
+      bookId: number,
+      chapterId: number,
+      body: { selected_text: string; title?: string; extra_content?: string },
+    ) =>
+      req<import("@/types").Note>(
+        `/api/books/${bookId}/chapters/${chapterId}/anchor-note`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        },
+      ),
+    migrateHistory: (bookId: number, include_qa: boolean, include_explain: boolean) =>
+      req<{ created: number; skipped: number }>(
+        `/api/books/${bookId}/migrate-history`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ include_qa, include_explain }),
+        },
+      ),
+  },
+
   providers: {
     capabilities: () =>
       req<{ tavily_available: boolean; valid_capabilities: string[] }>("/api/providers/capabilities"),
