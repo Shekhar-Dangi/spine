@@ -268,6 +268,7 @@ class TaskMappingIn(BaseModel):
     map_extract: int | None = None
     toc_extract: int | None = None
     embed: int | None = None
+    extract: int | None = None
 
 
 @router.get("/task-mapping", response_model=dict)
