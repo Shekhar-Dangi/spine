@@ -416,6 +416,7 @@ const TASK_LABELS: Record<RoutingTask, string> = {
   map_extract: "Chapter Concept Map",
   toc_extract: "TOC Suggestion (LLM)",
   embed: "Embedding (book indexing + search)",
+  extract: "Knowledge Extraction",
 };
 
 const ROUTING_TASKS: RoutingTask[] = [
@@ -425,6 +426,7 @@ const ROUTING_TASKS: RoutingTask[] = [
   "map_extract",
   "toc_extract",
   "embed",
+  "extract",
 ];
 
 export function TaskRoutingManager() {
@@ -436,6 +438,7 @@ export function TaskRoutingManager() {
     map_extract: null,
     toc_extract: null,
     embed: null,
+    extract: null,
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);

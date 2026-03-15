@@ -16,17 +16,10 @@ function getLocalNetworkIPs(): string[] {
 
 const nextConfig: NextConfig = {
   allowedDevOrigins: getLocalNetworkIPs(),
-  async rewrites() {
-    // Used in local dev only. On Vercel, vercel.json external rewrites
-    // handle /api/* at the CDN layer (bypasses the 4.5MB function limit).
-    const backendUrl = process.env.BACKEND_URL ?? "http://localhost:8000";
-    return [
-      {
-        source: "/api/:path*",
-        destination: `${backendUrl}/api/:path*`,
-      },
-    ];
-  },
+  // Rewrites removed: /api/* is now proxied via src/app/api/[...path]/route.ts
+  // which pipes response.body (ReadableStream) directly to the browser — no buffering.
+  // rewrites() buffered the entire SSE response before forwarding, breaking LLM streaming.
+  // Production uses vercel.json external rewrites at the CDN layer (unchanged).
 };
 
 export default nextConfig;

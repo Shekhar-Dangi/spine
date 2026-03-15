@@ -8,7 +8,8 @@ import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import { api } from "@/lib/api";
 import ThemeToggle from "@/components/ui/ThemeToggle";
-import type { Note } from "@/types";
+import GlobalSearch from "@/components/search/GlobalSearch";
+import type { ExtractionJob, Note } from "@/types";
 
 const ORIGIN_LABELS: Record<string, string> = {
   standalone: "Standalone",
@@ -42,6 +43,11 @@ export default function NoteDetailPage() {
   // Delete state
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
+
+  // Extraction state
+  const [extracting, setExtracting] = useState(false);
+  const [extractionJob, setExtractionJob] = useState<ExtractionJob | null>(null);
+  const extractPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -127,6 +133,40 @@ export default function NoteDetailPage() {
     }
   };
 
+  const handleExtract = async () => {
+    if (!note || extracting) return;
+    setExtracting(true);
+    try {
+      const job = await api.knowledge.triggerExtraction({ noteId: note.id });
+      setExtractionJob(job);
+
+      // Poll job status until completed or failed
+      const poll = setInterval(async () => {
+        try {
+          const updated = await api.knowledge.getJob(job.id);
+          setExtractionJob(updated);
+          if (updated.status === "completed" || updated.status === "failed") {
+            clearInterval(poll);
+            setExtracting(false);
+          }
+        } catch {
+          clearInterval(poll);
+          setExtracting(false);
+        }
+      }, 2000);
+      extractPollRef.current = poll;
+    } catch {
+      setExtracting(false);
+    }
+  };
+
+  // Cleanup poll on unmount
+  useEffect(() => {
+    return () => {
+      if (extractPollRef.current) clearInterval(extractPollRef.current);
+    };
+  }, []);
+
   const formatDate = (iso: string) =>
     new Date(iso).toLocaleDateString("en-US", {
       month: "short",
@@ -179,6 +219,7 @@ export default function NoteDetailPage() {
             {saveError && (
               <span className="text-[11px] text-red-500">{saveError}</span>
             )}
+            <GlobalSearch />
             <ThemeToggle />
           </div>
         </div>
@@ -321,6 +362,65 @@ export default function NoteDetailPage() {
               <span className="text-xs text-red-500 dark:text-red-400">{linkError}</span>
             )}
           </div>
+        </section>
+
+        {/* Knowledge extraction */}
+        <section className="border-t border-stone-200 dark:border-stone-800 pt-6 mb-8">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-xs font-semibold text-stone-500 dark:text-stone-500 uppercase tracking-wider">
+              Knowledge Extraction
+            </h2>
+            <button
+              onClick={handleExtract}
+              disabled={extracting}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-stone-100 dark:bg-stone-800 hover:bg-stone-200 dark:hover:bg-stone-700 text-stone-600 dark:text-stone-400 text-xs font-medium disabled:opacity-50 transition-colors"
+            >
+              {extracting ? (
+                <>
+                  <div className="h-2.5 w-2.5 border border-stone-400 border-t-transparent rounded-full animate-spin" />
+                  Extracting…
+                </>
+              ) : (
+                <>
+                  <svg className="w-3 h-3" fill="none" viewBox="0 0 16 16" stroke="currentColor" strokeWidth="1.8">
+                    <path d="M8 2v12M2 8h12" strokeLinecap="round" />
+                  </svg>
+                  Extract knowledge
+                </>
+              )}
+            </button>
+          </div>
+
+          {extractionJob && (
+            <div className={`rounded-lg px-3 py-2 text-xs leading-relaxed ${
+              extractionJob.status === "completed"
+                ? "bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-400"
+                : extractionJob.status === "failed"
+                  ? "bg-red-50 dark:bg-red-950/30 text-red-600 dark:text-red-400"
+                  : "bg-stone-100 dark:bg-stone-800 text-stone-500 dark:text-stone-400"
+            }`}>
+              {extractionJob.status === "completed" && (
+                <>
+                  Extraction complete.{" "}
+                  <Link href="/review" className="underline hover:text-emerald-600 dark:hover:text-emerald-300 transition-colors">
+                    Review suggestions →
+                  </Link>
+                </>
+              )}
+              {extractionJob.status === "failed" && (
+                <>Failed: {extractionJob.error_message || "Unknown error"}</>
+              )}
+              {(extractionJob.status === "pending" || extractionJob.status === "running") && (
+                <>Running extraction…</>
+              )}
+            </div>
+          )}
+
+          {!extractionJob && (
+            <p className="text-xs text-stone-400 dark:text-stone-600 leading-relaxed">
+              Extract concepts, people, events, and relationships from this note for your knowledge graph. Proposals go to a review inbox — nothing is added automatically.
+            </p>
+          )}
         </section>
 
         {/* Danger zone */}

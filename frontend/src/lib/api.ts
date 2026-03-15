@@ -272,6 +272,15 @@ export const api = {
           body: JSON.stringify({ title: title ?? null }),
         },
       ),
+    saveExplainContent: (bookId: number, chapterId: number, mode: string, title?: string) =>
+      req<import("@/types").SaveNoteResult>(
+        `/api/books/${bookId}/chapters/${chapterId}/explain/save`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ mode, title: title ?? null }),
+        },
+      ),
     savePassage: (
       bookId: number,
       chapterId: number,
@@ -294,6 +303,109 @@ export const api = {
           body: JSON.stringify({ include_qa, include_explain }),
         },
       ),
+  },
+
+  knowledge: {
+    triggerExtraction: (source: { noteId: number } | { content: string }) =>
+      req<import("@/types").ExtractionJob>("/api/knowledge/extract", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(
+          "noteId" in source
+            ? { note_id: source.noteId }
+            : { source_content: source.content },
+        ),
+      }),
+    getJob: (jobId: number) =>
+      req<import("@/types").ExtractionJob>(`/api/knowledge/jobs/${jobId}`),
+    listSuggestions: (params?: { status?: string; limit?: number; offset?: number }) => {
+      const qs = new URLSearchParams();
+      if (params?.status) qs.set("status", params.status);
+      if (params?.limit != null) qs.set("limit", String(params.limit));
+      if (params?.offset != null) qs.set("offset", String(params.offset));
+      const q = qs.toString();
+      return req<import("@/types").SuggestionsListResponse>(
+        `/api/knowledge/suggestions${q ? `?${q}` : ""}`
+      );
+    },
+    approveSuggestion: (id: number) =>
+      req<{ approved: boolean }>(`/api/knowledge/suggestions/${id}/approve`, {
+        method: "POST",
+      }),
+    rejectSuggestion: (id: number) =>
+      req<{ rejected: boolean }>(`/api/knowledge/suggestions/${id}/reject`, {
+        method: "POST",
+      }),
+    dismissSuggestion: (id: number) =>
+      req<{ dismissed: boolean }>(`/api/knowledge/suggestions/${id}/dismiss`, {
+        method: "POST",
+      }),
+
+    // Phase 3 — nodes + graph
+    listNodes: (params?: { node_type?: string; search?: string; limit?: number; offset?: number }) => {
+      const qs = new URLSearchParams();
+      if (params?.node_type) qs.set("node_type", params.node_type);
+      if (params?.search) qs.set("search", params.search);
+      if (params?.limit != null) qs.set("limit", String(params.limit));
+      if (params?.offset != null) qs.set("offset", String(params.offset));
+      const q = qs.toString();
+      return req<import("@/types").KnowledgeNodesResponse>(`/api/knowledge/nodes${q ? `?${q}` : ""}`);
+    },
+    getNode: (nodeId: number) =>
+      req<import("@/types").KnowledgeNode & { edges: import("@/types").KnowledgeEdge[] }>(
+        `/api/knowledge/nodes/${nodeId}`
+      ),
+    createNode: (body: {
+      type: string;
+      name: string;
+      aliases?: string[];
+      description?: string | null;
+      node_metadata?: Record<string, unknown>;
+    }) =>
+      req<import("@/types").KnowledgeNode>("/api/knowledge/nodes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      }),
+    updateNode: (
+      nodeId: number,
+      body: {
+        name?: string;
+        type?: string;
+        aliases?: string[];
+        description?: string | null;
+        node_metadata?: Record<string, unknown>;
+      },
+    ) =>
+      req<import("@/types").KnowledgeNode>(`/api/knowledge/nodes/${nodeId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      }),
+    deleteNode: (nodeId: number) =>
+      req<void>(`/api/knowledge/nodes/${nodeId}`, { method: "DELETE" }),
+    createEdge: (nodeId: number, body: { to_node_id: number; relation: string }) =>
+      req<import("@/types").KnowledgeEdge>(`/api/knowledge/nodes/${nodeId}/edges`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      }),
+    deleteEdge: (edgeId: number) =>
+      req<void>(`/api/knowledge/edges/${edgeId}`, { method: "DELETE" }),
+    getGraph: (params?: { node_type?: string; search?: string }) => {
+      const qs = new URLSearchParams();
+      if (params?.node_type) qs.set("node_type", params.node_type);
+      if (params?.search) qs.set("search", params.search);
+      const q = qs.toString();
+      return req<import("@/types").KnowledgeGraphResponse>(`/api/knowledge/graph${q ? `?${q}` : ""}`);
+    },
+  },
+
+  search: {
+    query: (q: string, limit = 20) => {
+      const qs = new URLSearchParams({ q, limit: String(limit) });
+      return req<import("@/types").SearchResponse>(`/api/search?${qs}`);
+    },
   },
 
   providers: {

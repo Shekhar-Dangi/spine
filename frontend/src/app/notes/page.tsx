@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import ThemeToggle from "@/components/ui/ThemeToggle";
+import GlobalSearch from "@/components/search/GlobalSearch";
 import type { Note, NoteOriginType } from "@/types";
 
 const ORIGIN_LABELS: Record<NoteOriginType, string> = {
@@ -94,6 +95,18 @@ export default function NotesPage() {
               Library
             </Link>
             <Link
+              href="/review"
+              className="text-xs sm:text-sm text-stone-500 dark:text-stone-400 hover:text-stone-900 dark:hover:text-stone-100 transition-colors px-2 py-1.5 rounded-md hover:bg-stone-100 dark:hover:bg-stone-800"
+            >
+              Review
+            </Link>
+            <Link
+              href="/explore"
+              className="text-xs sm:text-sm text-stone-500 dark:text-stone-400 hover:text-stone-900 dark:hover:text-stone-100 transition-colors px-2 py-1.5 rounded-md hover:bg-stone-100 dark:hover:bg-stone-800"
+            >
+              Explore
+            </Link>
+            <Link
               href="/settings"
               className="text-xs sm:text-sm text-stone-500 dark:text-stone-400 hover:text-stone-900 dark:hover:text-stone-100 transition-colors px-2 py-1.5 rounded-md hover:bg-stone-100 dark:hover:bg-stone-800"
             >
@@ -107,6 +120,7 @@ export default function NotesPage() {
                 Sign out
               </button>
             )}
+            <GlobalSearch />
             <ThemeToggle />
           </nav>
         </div>

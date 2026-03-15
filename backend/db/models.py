@@ -443,7 +443,7 @@ class ModelProfile(Base):
 
 # Canonical routing task names.
 # "embed" requires an embedding-capable profile; all others require chat-capable.
-ROUTING_TASKS = ("dossier", "explain", "qa", "map_extract", "toc_extract", "embed")
+ROUTING_TASKS = ("dossier", "explain", "qa", "map_extract", "toc_extract", "embed", "extract")
 
 # Which capability each task requires
 TASK_REQUIRED_CAPABILITY: dict[str, str] = {
@@ -453,6 +453,7 @@ TASK_REQUIRED_CAPABILITY: dict[str, str] = {
     "map_extract": "chat",
     "toc_extract": "chat",
     "embed": "embedding",
+    "extract": "chat",
 }
 
 
@@ -500,6 +501,7 @@ class EvidenceSourceType(str, enum.Enum):
     NOTE = "note"
     QA_TURN = "qa_turn"
     EXPLAIN_TURN = "explain_turn"
+    SOURCE_DOC = "source_doc"
 
 
 class JobStatus(str, enum.Enum):
@@ -518,6 +520,7 @@ class SuggestionStatus(str, enum.Enum):
 
 class SuggestionType(str, enum.Enum):
     NEW_NODE = "new_node"
+    ENRICH_NODE = "enrich_node"
     MERGE_NODE = "merge_node"
     ALIAS = "alias"
     NEW_EDGE = "new_edge"
@@ -581,6 +584,9 @@ class Note(Base):
     # message.id depending on origin_type. No DB-level constraint.
     origin_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     last_indexed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    last_extracted_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
@@ -653,6 +659,9 @@ class KnowledgeNode(Base):
     node_metadata: Mapped[dict] = mapped_column(
         "metadata", JSONB(), server_default="{}", nullable=False
     )
+    # Variable-dim vector — same pattern as Chunk.embedding / NoteChunk.embedding.
+    # No ANN index: per-user scan across ~200 nodes is trivial without one.
+    embedding = mapped_column(Vector(), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_now, onupdate=_now
@@ -733,6 +742,36 @@ class Evidence(Base):
     edge: Mapped["KnowledgeEdge"] = relationship(back_populates="evidence")
 
 
+class NodeSource(Base):
+    """Links a knowledge node to a source text that mentions it.
+
+    Provides node-level provenance so the node detail view can show all
+    raw material the user has studied about this node, grouped by source.
+
+    source_type is a string matching EvidenceSourceType values:
+      chunk | passage_anchor | note | qa_turn | explain_turn | source_doc
+
+    source_id is a polymorphic FK validated at the application layer.
+    excerpt holds a short raw text passage that mentions the node (optional).
+    """
+    __tablename__ = "node_sources"
+    __table_args__ = (
+        Index("ix_node_sources_node_id", "node_id"),
+        Index("ix_node_sources_source", "source_type", "source_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    node_id: Mapped[int] = mapped_column(
+        ForeignKey("knowledge_nodes.id", ondelete="CASCADE"), nullable=False
+    )
+    source_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    source_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    excerpt: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+    node: Mapped["KnowledgeNode"] = relationship()
+
+
 class ExtractionJob(Base):
     """Async job that runs LLM extraction on a set of notes.
 
@@ -755,6 +794,14 @@ class ExtractionJob(Base):
     note_ids: Mapped[list[int]] = mapped_column(
         ARRAY(Integer()), nullable=False
     )
+    # FK to source_documents — set when extraction runs on a background source
+    # record rather than a saved note.
+    source_doc_id: Mapped[int | None] = mapped_column(
+        ForeignKey("source_documents.id", ondelete="SET NULL"), nullable=True
+    )
+    # DEPRECATED — kept for backward compat with migration 006 jobs.
+    # New jobs must use note_ids or source_doc_id instead.
+    source_content: Mapped[str | None] = mapped_column(Text, nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     completed_at: Mapped[datetime | None] = mapped_column(
@@ -808,3 +855,103 @@ class Suggestion(Base):
 
     user: Mapped["User"] = relationship()
     job: Mapped["ExtractionJob"] = relationship(back_populates="suggestions")
+
+
+# ---------------------------------------------------------------------------
+# V2 Knowledge Layer — Phase 4a: Source Documents
+# ---------------------------------------------------------------------------
+
+
+class SourceDocType(str, enum.Enum):
+    QA_TURN = "qa_turn"
+    EXPLAIN_TURN = "explain_turn"
+    BOOK_PASSAGE = "book_passage"
+    MANUAL_TEXT = "manual_text"
+
+
+class SourceDocument(Base):
+    """Background source record for non-note extraction inputs.
+
+    Created when a user triggers extraction directly from Q&A, Explain,
+    a book passage, or pasted text — without first saving a note.
+    Not visible in the Notes product.
+    """
+    __tablename__ = "source_documents"
+    __table_args__ = (
+        Index("ix_source_documents_user_id", "user_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    source_type: Mapped[SourceDocType] = mapped_column(
+        Enum(SourceDocType, name="source_doc_type"), nullable=False
+    )
+    title: Mapped[str | None] = mapped_column(Text)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    # Soft reference back to the originating entity, e.g.
+    # {"book_id": 3, "chapter_id": 7, "message_id": 42}
+    origin_ref: Mapped[dict] = mapped_column(
+        JSONB(), server_default="{}", nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+    user: Mapped["User"] = relationship()
+    chunks: Mapped[list["SourceChunk"]] = relationship(
+        back_populates="source_doc", cascade="all, delete-orphan"
+    )
+
+
+class SourceChunk(Base):
+    """Chunked + embedded slice of a SourceDocument for vector retrieval.
+
+    Created (and re-created) by services/source_docs.py when chunking is
+    triggered. Used for unified semantic search (Phase 4d) and as retrieval
+    context for future queries.
+    """
+    __tablename__ = "source_chunks"
+    __table_args__ = (
+        Index("ix_source_chunks_source_doc_id", "source_doc_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    source_doc_id: Mapped[int] = mapped_column(
+        ForeignKey("source_documents.id", ondelete="CASCADE"), nullable=False
+    )
+    chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    # Variable-dimension vector — same pattern as Chunk.embedding / NoteChunk.embedding.
+    embedding = mapped_column(Vector(), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+    source_doc: Mapped["SourceDocument"] = relationship(back_populates="chunks")
+
+
+# ---------------------------------------------------------------------------
+# V2 Knowledge Layer — Phase 2
+# ---------------------------------------------------------------------------
+
+
+class NoteChunk(Base):
+    """Chunked + embedded slice of a note for vector retrieval.
+
+    Created lazily before first retrieval. Invalidated when note.updated_at
+    advances past note.last_indexed_at. Re-embedding sets last_indexed_at.
+    """
+    __tablename__ = "note_chunks"
+    __table_args__ = (
+        Index("ix_note_chunks_note_id", "note_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    note_id: Mapped[int] = mapped_column(
+        ForeignKey("notes.id", ondelete="CASCADE"), nullable=False
+    )
+    chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    # Variable-dimension vector — same pattern as Chunk.embedding.
+    embedding = mapped_column(Vector(), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+    note: Mapped["Note"] = relationship()

@@ -4,7 +4,7 @@ Handles both chat completions and embeddings via the openai library.
 """
 from typing import AsyncIterator
 
-from openai import AsyncOpenAI
+from openai import AsyncOpenAI, BadRequestError
 
 from providers.base import BaseProvider, ProviderConfig
 
@@ -63,6 +63,29 @@ class OpenAIAdapter(BaseProvider):
                     yield delta
 
         return _stream_generator()
+
+    async def generate_json(
+        self,
+        messages: list[dict],
+        *,
+        max_tokens: int = 2048,
+    ) -> str:
+        """Use json_object response_format when the model supports it.
+
+        Falls back to a plain generate_text call for models (e.g. on OpenRouter)
+        that return BadRequestError for the response_format parameter.
+        """
+        try:
+            response = await self._client.chat.completions.create(
+                model=self.config.model,
+                messages=messages,
+                response_format={"type": "json_object"},
+                **self._token_limit_kwargs(max_tokens),
+            )
+            return response.choices[0].message.content or ""
+        except BadRequestError:
+            # Model doesn't support response_format — fall back to plain completion
+            return await self.generate_text(messages, max_tokens=max_tokens)
 
     async def embed_texts(self, texts: list[str]) -> list[list[float]]:
         """

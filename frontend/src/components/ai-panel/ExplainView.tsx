@@ -1,5 +1,6 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
+import Link from "next/link";
 import ReactMarkdown from "react-markdown";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
@@ -7,7 +8,7 @@ import { api, streamPost } from "@/lib/api";
 import { useBookReader } from "@/contexts/BookReaderContext";
 import ExportPdfModal from "./ExportPdfModal";
 import { getExplainTemplates } from "@/lib/explainTemplates";
-import type { ExplainTemplate } from "@/types";
+import type { ExplainTemplate, ExtractionJob } from "@/types";
 
 /** Convert LLM LaTeX delimiters to remark-math format. */
 function normalizeLatex(text: string): string {
@@ -75,6 +76,10 @@ export default function ExplainView({ bookId }: Props) {
   const [exportingLLM, setExportingLLM] = useState(false);
   const [showGuide, setShowGuide] = useState(false);
   const [showExportMenu, setShowExportMenu] = useState(false);
+  const [savingExplain, setSavingExplain] = useState(false);
+  const [savedExplain, setSavedExplain] = useState(false);
+  const [extractionJob, setExtractionJob] = useState<ExtractionJob | null>(null);
+  const extractPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const exportMenuRef = useRef<HTMLDivElement>(null);
 
   // Chat state
@@ -180,6 +185,8 @@ export default function ExplainView({ bookId }: Props) {
     setModeStates(allModesFor(templates));
     setChatMessages([]);
     setActiveView("explain");
+    if (extractPollRef.current) clearInterval(extractPollRef.current);
+    setExtractionJob(null);
 
     if (!activeChapterId) return;
 
@@ -271,6 +278,11 @@ export default function ExplainView({ bookId }: Props) {
     chatBottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [chatMessages, chatPending, chatStreamContent]);
 
+  // Cleanup extraction poll on unmount
+  useEffect(() => {
+    return () => { if (extractPollRef.current) clearInterval(extractPollRef.current); };
+  }, []);
+
   // Close export menu on outside click
   useEffect(() => {
     if (!showExportMenu) return;
@@ -352,6 +364,42 @@ export default function ExplainView({ bookId }: Props) {
       setExportingLLM(false);
     }
   };
+
+  const handleSaveExplain = async () => {
+    if (!activeChapterId || !ms.content) return;
+    setSavingExplain(true);
+    try {
+      await api.notes.saveExplainContent(bookId, activeChapterId, activeMode);
+      setSavedExplain(true);
+      setTimeout(() => setSavedExplain(false), 2500);
+    } catch {
+      // silent
+    } finally {
+      setSavingExplain(false);
+    }
+  };
+
+  const handleExtractExplain = useCallback(async () => {
+    if (!ms.content || extractionJob) return;
+    try {
+      const job = await api.knowledge.triggerExtraction({ content: ms.content });
+      setExtractionJob(job);
+      const poll = setInterval(async () => {
+        try {
+          const updated = await api.knowledge.getJob(job.id);
+          setExtractionJob(updated);
+          if (updated.status === "completed" || updated.status === "failed") {
+            clearInterval(poll);
+          }
+        } catch {
+          clearInterval(poll);
+        }
+      }, 2000);
+      extractPollRef.current = poll;
+    } catch {
+      // silent
+    }
+  }, [ms.content, extractionJob]);
 
   const hasContent = Boolean(ms.content);
   const anyStreaming = templates.some(({ key }) => modeStates[key]?.streaming);
@@ -495,6 +543,50 @@ export default function ExplainView({ bookId }: Props) {
                         </svg>
                         Export .txt
                       </button>
+                      <div className="h-px bg-stone-100 dark:bg-stone-800" />
+                      <button
+                        onClick={() => { handleSaveExplain(); setShowExportMenu(false); }}
+                        disabled={savingExplain}
+                        className="w-full flex items-center gap-2.5 px-3 py-2 text-[11px] text-stone-600 dark:text-stone-300 hover:bg-stone-50 dark:hover:bg-stone-800 disabled:opacity-40 transition-colors text-left"
+                      >
+                        <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.4" className="w-3 h-3 shrink-0">
+                          <path d="M2 1h10a1 1 0 0 1 1 1v9.5l-6-3-6 3V2a1 1 0 0 1 1-1z" strokeLinejoin="round"/>
+                        </svg>
+                        {savedExplain ? "Saved ✓" : savingExplain ? "Saving…" : "Save to notes"}
+                      </button>
+                      {extractionJob?.status === "completed" ? (
+                        <div className="w-full flex items-center gap-2.5 px-3 py-2 text-[11px] text-emerald-600 dark:text-emerald-400 text-left">
+                          <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.4" className="w-3 h-3 shrink-0">
+                            <circle cx="4" cy="4" r="2"/><circle cx="10" cy="4" r="2"/><circle cx="7" cy="11" r="2"/>
+                            <path d="M4 6v2l3 1M10 6v2l-3 1" strokeLinecap="round"/>
+                          </svg>
+                          {extractionJob.suggestion_count === 0
+                            ? "Nothing found"
+                            : <>Done — {extractionJob.suggestion_count ?? "…"} suggestion{extractionJob.suggestion_count !== 1 ? "s" : ""} —{" "}
+                              <Link href="/review" className="underline hover:text-emerald-700 dark:hover:text-emerald-300" onClick={() => setShowExportMenu(false)}>Review →</Link>
+                            </>
+                          }
+                        </div>
+                      ) : (
+                        <button
+                          onClick={handleExtractExplain}
+                          disabled={!!extractionJob}
+                          className="w-full flex items-center gap-2.5 px-3 py-2 text-[11px] text-stone-600 dark:text-stone-300 hover:bg-stone-50 dark:hover:bg-stone-800 disabled:opacity-40 transition-colors text-left"
+                        >
+                          {extractionJob && extractionJob.status !== "failed" ? (
+                            <div className="h-3 w-3 border border-stone-400 border-t-transparent rounded-full animate-spin shrink-0" />
+                          ) : (
+                            <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.4" className="w-3 h-3 shrink-0">
+                              <circle cx="4" cy="4" r="2"/><circle cx="10" cy="4" r="2"/><circle cx="7" cy="11" r="2"/>
+                              <path d="M4 6v2l3 1M10 6v2l-3 1" strokeLinecap="round"/>
+                            </svg>
+                          )}
+                          {!extractionJob && "Extract knowledge"}
+                          {extractionJob?.status === "pending" && "Pending…"}
+                          {extractionJob?.status === "running" && "Extracting…"}
+                          {extractionJob?.status === "failed" && "Failed"}
+                        </button>
+                      )}
                     </div>
                   )}
                 </div>
@@ -767,6 +859,12 @@ function ChatBubble({
   const [saved, setSaved] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [titleInput, setTitleInput] = useState("");
+  const [extractionJob, setExtractionJob] = useState<ExtractionJob | null>(null);
+  const extractPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    return () => { if (extractPollRef.current) clearInterval(extractPollRef.current); };
+  }, []);
 
   const handleSave = async () => {
     if (!messageId || !bookId || !chapterId) return;
@@ -780,6 +878,29 @@ function ChatBubble({
       // silent
     } finally {
       setSaving(false);
+    }
+  };
+
+  // Extract is independent of save — uses message content directly
+  const handleExtract = async () => {
+    if (!content || extractionJob) return;
+    try {
+      const job = await api.knowledge.triggerExtraction({ content });
+      setExtractionJob(job);
+      const poll = setInterval(async () => {
+        try {
+          const updated = await api.knowledge.getJob(job.id);
+          setExtractionJob(updated);
+          if (updated.status === "completed" || updated.status === "failed") {
+            clearInterval(poll);
+          }
+        } catch {
+          clearInterval(poll);
+        }
+      }, 2000);
+      extractPollRef.current = poll;
+    } catch {
+      // silent
     }
   };
 
@@ -807,13 +928,11 @@ function ChatBubble({
           )}
         </div>
 
-        {/* Save button — only for persisted messages with IDs */}
+        {/* Save + Extract — independent actions, only for persisted messages */}
         {!streaming && messageId && bookId && chapterId && (
           <div className="mt-1">
-            {saved ? (
-              <span className="text-[11px] text-emerald-600 dark:text-emerald-400">Saved to notes ✓</span>
-            ) : showForm ? (
-              <div className="flex items-center gap-1.5 mt-1">
+            {showForm ? (
+              <div className="flex items-center gap-1.5">
                 <input
                   autoFocus
                   type="text"
@@ -838,15 +957,51 @@ function ChatBubble({
                 </button>
               </div>
             ) : (
-              <button
-                onClick={() => setShowForm(true)}
-                className="opacity-0 group-hover:opacity-100 text-[11px] text-stone-400 dark:text-stone-600 hover:text-amber-600 dark:hover:text-amber-400 transition-all flex items-center gap-1"
-              >
-                <svg className="w-3 h-3" fill="none" viewBox="0 0 16 16" stroke="currentColor" strokeWidth="1.8">
-                  <path d="M3 2h10a1 1 0 0 1 1 1v10.5l-5-2.5-5 2.5V3a1 1 0 0 1 1-1z" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-                Save to notes
-              </button>
+              <div className="flex items-center gap-3">
+                {/* Save to note */}
+                {saved ? (
+                  <span className="text-[11px] text-emerald-600 dark:text-emerald-400">Saved ✓</span>
+                ) : (
+                  <button
+                    onClick={() => setShowForm(true)}
+                    className="opacity-0 group-hover:opacity-100 text-[11px] text-stone-400 dark:text-stone-600 hover:text-amber-600 dark:hover:text-amber-400 transition-all flex items-center gap-1"
+                  >
+                    <svg className="w-3 h-3" fill="none" viewBox="0 0 16 16" stroke="currentColor" strokeWidth="1.8">
+                      <path d="M3 2h10a1 1 0 0 1 1 1v10.5l-5-2.5-5 2.5V3a1 1 0 0 1 1-1z" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                    Save to notes
+                  </button>
+                )}
+                {/* Extract — independent, uses content directly */}
+                {extractionJob ? (
+                  <span className={`text-[11px] ${
+                    extractionJob.status === "completed" ? "text-emerald-600 dark:text-emerald-400" :
+                    extractionJob.status === "failed" ? "text-red-500 dark:text-red-400" :
+                    "text-sky-600 dark:text-sky-400"
+                  }`}>
+                    {extractionJob.status === "pending" && "Pending…"}
+                    {extractionJob.status === "running" && "Extracting…"}
+                    {extractionJob.status === "completed" && (
+                      extractionJob.suggestion_count === 0
+                        ? "Nothing found"
+                        : <><Link href="/review" className="underline hover:text-emerald-700 dark:hover:text-emerald-300">
+                            {extractionJob.suggestion_count ?? "…"} suggestion{extractionJob.suggestion_count !== 1 ? "s" : ""} →
+                          </Link></>
+                    )}
+                    {extractionJob.status === "failed" && "Failed"}
+                  </span>
+                ) : (
+                  <button
+                    onClick={handleExtract}
+                    className="opacity-0 group-hover:opacity-100 text-[11px] text-stone-400 dark:text-stone-600 hover:text-sky-600 dark:hover:text-sky-400 transition-all flex items-center gap-1"
+                  >
+                    <svg className="w-3 h-3" fill="none" viewBox="0 0 16 16" stroke="currentColor" strokeWidth="1.8">
+                      <path d="M8 1l3 5H5l3-5zM5 10l3 5 3-5H5z" strokeLinecap="round" strokeLinejoin="round"/>
+                    </svg>
+                    Extract
+                  </button>
+                )}
+              </div>
             )}
           </div>
         )}

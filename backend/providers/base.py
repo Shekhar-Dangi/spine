@@ -49,6 +49,20 @@ class BaseProvider(ABC):
     async def embed_texts(self, texts: list[str]) -> list[list[float]]:
         """Embed a batch of texts. Returns list of float vectors."""
 
+    async def generate_json(
+        self,
+        messages: list[dict],
+        *,
+        max_tokens: int = 2048,
+    ) -> str:
+        """Non-streaming completion that requests JSON output.
+
+        Returns the raw JSON string. Implementations should use the provider's
+        native JSON mode when available. The default falls back to generate_text.
+        The prompt MUST already instruct the model to return JSON.
+        """
+        return await self.generate_text(messages, max_tokens=max_tokens)
+
     async def embed_query(self, text: str) -> list[float]:
         """Embed a single query string. Convenience wrapper around embed_texts."""
         results = await self.embed_texts([text])

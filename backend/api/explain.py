@@ -46,6 +46,11 @@ class SaveExplainTurnIn(BaseModel):
     title: str | None = None
 
 
+class SaveExplainContentIn(BaseModel):
+    mode: str
+    title: str | None = None
+
+
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
@@ -173,6 +178,55 @@ async def save_explain_turn(
         raise HTTPException(status_code=404, detail=str(e))
     except PermissionError as e:
         raise HTTPException(status_code=403, detail=str(e))
+
+    return {
+        "id": note.id,
+        "title": note.title,
+        "origin_type": note.origin_type.value,
+        "origin_id": note.origin_id,
+        "created_at": note.created_at.isoformat(),
+    }
+
+
+@router.post("/{book_id}/chapters/{chapter_id}/explain/save", status_code=201)
+async def save_explain_content(
+    book_id: int,
+    chapter_id: int,
+    body: SaveExplainContentIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Save the cached main explain content for a mode as a note."""
+    book = await db.get(Book, book_id)
+    if not book or book.user_id != current_user.id:
+        raise HTTPException(status_code=404, detail="Book not found.")
+
+    chapter = await db.get(Chapter, chapter_id)
+    if not chapter or chapter.book_id != book_id:
+        raise HTTPException(status_code=404, detail="Chapter not found.")
+
+    result = await db.execute(
+        select(ChapterExplain).where(
+            ChapterExplain.chapter_id == chapter_id,
+            ChapterExplain.mode == body.mode,
+        )
+    )
+    explain = result.scalar_one_or_none()
+    if not explain or not explain.content:
+        raise HTTPException(status_code=404, detail="No cached explanation for this mode.")
+
+    from db.models import Note, NoteOriginType
+    title = body.title or f"{chapter.title} — {body.mode.replace('_', ' ').title()} explain"
+    note = Note(
+        user_id=current_user.id,
+        title=title,
+        content=explain.content,
+        origin_type=NoteOriginType.EXPLAIN_TURN,
+        origin_id=explain.id,
+    )
+    db.add(note)
+    await db.commit()
+    await db.refresh(note)
 
     return {
         "id": note.id,

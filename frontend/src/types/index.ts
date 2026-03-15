@@ -114,7 +114,8 @@ export type RoutingTask =
   | "qa"
   | "map_extract"
   | "toc_extract"
-  | "embed";
+  | "embed"
+  | "extract";
 
 /** Which capability each task requires. */
 export const TASK_REQUIRED_CAPABILITY: Record<RoutingTask, ModelCapability> = {
@@ -124,6 +125,7 @@ export const TASK_REQUIRED_CAPABILITY: Record<RoutingTask, ModelCapability> = {
   map_extract: "chat",
   toc_extract: "chat",
   embed: "embedding",
+  extract: "chat",
 };
 
 /** task_name → profile_id (null = use active/fallback profile). */
@@ -190,6 +192,123 @@ export interface SaveNoteResult {
 export interface NotesListResponse {
   notes: Note[];
   total: number;
+}
+
+// ---------------------------------------------------------------------------
+// V2 Knowledge Layer — Phase 2
+// ---------------------------------------------------------------------------
+
+export type AskScope = "whole_library" | "current_book" | "notes";
+
+export type SuggestionType = "new_node" | "merge_node" | "alias" | "new_edge" | "historical_tag";
+export type SuggestionStatus = "pending" | "approved" | "rejected" | "dismissed";
+
+export interface Suggestion {
+  id: number;
+  type: SuggestionType;
+  status: SuggestionStatus;
+  payload: Record<string, unknown>;
+  job_id: number;
+  reviewed_at: string | null;
+  created_at: string;
+}
+
+export interface SuggestionsListResponse {
+  suggestions: Suggestion[];
+  total: number;
+}
+
+export interface ExtractionJob {
+  id: number;
+  status: "pending" | "running" | "completed" | "failed";
+  suggestion_count: number | null;
+  error_message: string | null;
+  created_at: string;
+  completed_at: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// V2 Knowledge Layer — Phase 3 (Explorer)
+// ---------------------------------------------------------------------------
+
+export type KnowledgeNodeType = "concept" | "person" | "event" | "place" | "era";
+
+export interface KnowledgeNode {
+  id: number;
+  type: KnowledgeNodeType;
+  name: string;
+  aliases: string[];
+  description: string | null;
+  node_metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+  /** Only present on GET /api/knowledge/nodes/{id} */
+  edges?: KnowledgeEdge[];
+  /** Only present on GET /api/knowledge/nodes/{id} */
+  sources?: NodeSourceItem[];
+}
+
+export interface EvidenceItem {
+  id: number;
+  source_type: string;
+  source_id: number;
+  quote: string | null;
+  note_title: string | null;
+}
+
+export interface KnowledgeEdge {
+  id: number;
+  from_node_id: number;
+  to_node_id: number;
+  relation: string;
+  created_at: string;
+  /** Only present on GET /api/knowledge/nodes/{id} */
+  evidence?: EvidenceItem[];
+}
+
+export interface KnowledgeGraphResponse {
+  nodes: KnowledgeNode[];
+  edges: KnowledgeEdge[];
+}
+
+export interface KnowledgeNodesResponse {
+  nodes: KnowledgeNode[];
+  total: number;
+}
+
+// ---------------------------------------------------------------------------
+// V2 Knowledge Layer — Phase 4d (Unified Search)
+// ---------------------------------------------------------------------------
+
+export interface SearchResult {
+  source_type: "book" | "note" | "source_doc";
+  title: string;
+  chapter_title: string | null;
+  excerpt: string;
+  score: number;
+  meta: {
+    book_id?: number;
+    chapter_id?: number;
+    note_id?: number;
+    source_doc_id?: number;
+    origin_ref?: Record<string, unknown>;
+  };
+}
+
+// Node-level provenance — returned by GET /api/knowledge/nodes/{id}
+export interface NodeSourceItem {
+  id: number;
+  source_type: string;   // "note" | "source_doc" | "chunk" etc.
+  source_id: number;
+  excerpt: string | null;
+  note_title?: string | null;
+  source_doc_title?: string | null;
+  source_doc_type?: string | null;
+  created_at: string;
+}
+
+export interface SearchResponse {
+  results: SearchResult[];
 }
 
 /** A suggested chapter entry returned by POST /toc/suggest. */

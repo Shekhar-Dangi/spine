@@ -1,5 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
+import type { ExtractionJob } from "@/types";
 import ReactMarkdown from "react-markdown";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
@@ -254,6 +256,12 @@ function MessageBubble({
   const [saved, setSaved] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [titleInput, setTitleInput] = useState("");
+  const [extractionJob, setExtractionJob] = useState<ExtractionJob | null>(null);
+  const extractPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    return () => { if (extractPollRef.current) clearInterval(extractPollRef.current); };
+  }, []);
 
   const handleSave = async () => {
     setSaving(true);
@@ -266,6 +274,29 @@ function MessageBubble({
       // silent — keep form open
     } finally {
       setSaving(false);
+    }
+  };
+
+  // Extract is independent — uses message content directly, no note required
+  const handleExtract = async () => {
+    if (!msg.content || extractionJob) return;
+    try {
+      const job = await api.knowledge.triggerExtraction({ content: msg.content });
+      setExtractionJob(job);
+      const poll = setInterval(async () => {
+        try {
+          const updated = await api.knowledge.getJob(job.id);
+          setExtractionJob(updated);
+          if (updated.status === "completed" || updated.status === "failed") {
+            clearInterval(poll);
+          }
+        } catch {
+          clearInterval(poll);
+        }
+      }, 2000);
+      extractPollRef.current = poll;
+    } catch {
+      // silent
     }
   };
 
@@ -323,13 +354,11 @@ function MessageBubble({
           </ReactMarkdown>
         </div>
 
-        {/* Save form / button */}
+        {/* Save + Extract — independent actions */}
         {!selectMode && (
           <div className="mt-1">
-            {saved ? (
-              <span className="text-[11px] text-emerald-600 dark:text-emerald-400">Saved to notes ✓</span>
-            ) : showForm ? (
-              <div className="flex items-center gap-1.5 mt-1">
+            {showForm ? (
+              <div className="flex items-center gap-1.5">
                 <input
                   autoFocus
                   type="text"
@@ -354,15 +383,52 @@ function MessageBubble({
                 </button>
               </div>
             ) : (
-              <button
-                onClick={() => setShowForm(true)}
-                className="opacity-0 group-hover:opacity-100 text-[11px] text-stone-400 dark:text-stone-600 hover:text-amber-600 dark:hover:text-amber-400 transition-all flex items-center gap-1"
-              >
-                <svg className="w-3 h-3" fill="none" viewBox="0 0 16 16" stroke="currentColor" strokeWidth="1.8">
-                  <path d="M3 2h10a1 1 0 0 1 1 1v10.5l-5-2.5-5 2.5V3a1 1 0 0 1 1-1z" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-                Save to notes
-              </button>
+              <div className="flex items-center gap-3">
+                {/* Save to note */}
+                {saved ? (
+                  <span className="text-[11px] text-emerald-600 dark:text-emerald-400">Saved ✓</span>
+                ) : (
+                  <button
+                    onClick={() => setShowForm(true)}
+                    className="opacity-0 group-hover:opacity-100 text-[11px] text-stone-400 dark:text-stone-600 hover:text-amber-600 dark:hover:text-amber-400 transition-all flex items-center gap-1"
+                  >
+                    <svg className="w-3 h-3" fill="none" viewBox="0 0 16 16" stroke="currentColor" strokeWidth="1.8">
+                      <path d="M3 2h10a1 1 0 0 1 1 1v10.5l-5-2.5-5 2.5V3a1 1 0 0 1 1-1z" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                    Save to notes
+                  </button>
+                )}
+                {/* Extract — independent, uses content directly */}
+                {extractionJob ? (
+                  <span className={`text-[11px] ${
+                    extractionJob.status === "completed" ? "text-emerald-600 dark:text-emerald-400" :
+                    extractionJob.status === "failed" ? "text-red-500 dark:text-red-400" :
+                    "text-sky-600 dark:text-sky-400"
+                  }`}>
+                    {extractionJob.status === "pending" && "Pending…"}
+                    {extractionJob.status === "running" && "Extracting…"}
+                    {extractionJob.status === "completed" && (
+                      extractionJob.suggestion_count === 0
+                        ? "Nothing found"
+                        : <Link href="/review" className="underline hover:text-emerald-700 dark:hover:text-emerald-300">
+                            {extractionJob.suggestion_count ?? "…"} suggestion{extractionJob.suggestion_count !== 1 ? "s" : ""} →
+                          </Link>
+                    )}
+                    {extractionJob.status === "failed" && "Failed"}
+                  </span>
+                ) : (
+                  <button
+                    onClick={handleExtract}
+                    className="opacity-0 group-hover:opacity-100 text-[11px] text-stone-400 dark:text-stone-600 hover:text-sky-600 dark:hover:text-sky-400 transition-all flex items-center gap-1"
+                  >
+                    <svg className="w-3 h-3" fill="none" viewBox="0 0 16 16" stroke="currentColor" strokeWidth="1.8">
+                      <circle cx="5" cy="5" r="2.5"/><circle cx="11" cy="5" r="2.5"/><circle cx="8" cy="12" r="2.5"/>
+                      <path d="M5 7.5v1.5l3 1.5M11 7.5v1.5l-3 1.5" strokeLinecap="round"/>
+                    </svg>
+                    Extract
+                  </button>
+                )}
+              </div>
             )}
           </div>
         )}

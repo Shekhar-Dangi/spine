@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import BookLibrary from "@/components/library/BookLibrary";
 import ThemeToggle from "@/components/ui/ThemeToggle";
+import GlobalSearch from "@/components/search/GlobalSearch";
 import { useAuth } from "@/contexts/AuthContext";
 
 export default function HomePage() {
@@ -32,10 +33,28 @@ export default function HomePage() {
           {/* Nav */}
           <nav className="flex items-center gap-0.5">
             <Link
+              href="/ask"
+              className="text-xs sm:text-sm text-stone-500 dark:text-stone-400 hover:text-stone-900 dark:hover:text-stone-100 transition-colors px-2 py-1.5 rounded-md hover:bg-stone-100 dark:hover:bg-stone-800"
+            >
+              Ask
+            </Link>
+            <Link
               href="/notes"
               className="text-xs sm:text-sm text-stone-500 dark:text-stone-400 hover:text-stone-900 dark:hover:text-stone-100 transition-colors px-2 py-1.5 rounded-md hover:bg-stone-100 dark:hover:bg-stone-800"
             >
               Notes
+            </Link>
+            <Link
+              href="/review"
+              className="text-xs sm:text-sm text-stone-500 dark:text-stone-400 hover:text-stone-900 dark:hover:text-stone-100 transition-colors px-2 py-1.5 rounded-md hover:bg-stone-100 dark:hover:bg-stone-800"
+            >
+              Review
+            </Link>
+            <Link
+              href="/explore"
+              className="text-xs sm:text-sm text-stone-500 dark:text-stone-400 hover:text-stone-900 dark:hover:text-stone-100 transition-colors px-2 py-1.5 rounded-md hover:bg-stone-100 dark:hover:bg-stone-800"
+            >
+              Explore
             </Link>
             <Link
               href="/settings"
@@ -56,6 +75,7 @@ export default function HomePage() {
                 </button>
               </>
             )}
+            <GlobalSearch />
             <ThemeToggle />
           </nav>
         </div>

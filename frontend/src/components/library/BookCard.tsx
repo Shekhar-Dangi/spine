@@ -18,6 +18,116 @@ interface Props {
   onChanged: () => void;
 }
 
+// ---------------------------------------------------------------------------
+// History migration modal
+// ---------------------------------------------------------------------------
+
+function MigrateHistoryModal({
+  book,
+  onClose,
+}: {
+  book: Book;
+  onClose: () => void;
+}) {
+  const [includeQa, setIncludeQa] = useState(true);
+  const [includeExplain, setIncludeExplain] = useState(true);
+  const [running, setRunning] = useState(false);
+  const [result, setResult] = useState<{ created: number; skipped: number } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleRun = async () => {
+    if (!includeQa && !includeExplain) return;
+    setRunning(true);
+    setError(null);
+    try {
+      const r = await api.notes.migrateHistory(book.id, includeQa, includeExplain);
+      setResult(r);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Import failed.");
+    } finally {
+      setRunning(false);
+    }
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 backdrop-blur-sm p-4"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-700 rounded-xl p-5 w-full max-w-sm space-y-4 shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div>
+          <h3 className="text-sm font-medium text-stone-800 dark:text-stone-200">Import reading history</h3>
+          <p className="text-xs text-stone-500 dark:text-stone-400 mt-1 leading-relaxed">
+            Save past conversations from <span className="font-medium text-stone-700 dark:text-stone-300">{book.title}</span> as notes. Already-saved turns are skipped.
+          </p>
+        </div>
+
+        {result ? (
+          <div className="rounded-lg bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/50 px-4 py-3 text-sm text-emerald-700 dark:text-emerald-400 space-y-0.5">
+            <p>{result.created} note{result.created !== 1 ? "s" : ""} created</p>
+            {result.skipped > 0 && (
+              <p className="text-[11px] text-emerald-600 dark:text-emerald-500">{result.skipped} already saved — skipped</p>
+            )}
+          </div>
+        ) : (
+          <>
+            <div className="space-y-2.5">
+              <label className="flex items-center gap-2.5 cursor-pointer group">
+                <input
+                  type="checkbox"
+                  checked={includeQa}
+                  onChange={(e) => setIncludeQa(e.target.checked)}
+                  className="w-3.5 h-3.5 accent-amber-600 cursor-pointer"
+                />
+                <span className="text-sm text-stone-700 dark:text-stone-300">Q&amp;A conversations</span>
+              </label>
+              <label className="flex items-center gap-2.5 cursor-pointer group">
+                <input
+                  type="checkbox"
+                  checked={includeExplain}
+                  onChange={(e) => setIncludeExplain(e.target.checked)}
+                  className="w-3.5 h-3.5 accent-amber-600 cursor-pointer"
+                />
+                <span className="text-sm text-stone-700 dark:text-stone-300">Deep Explain chats</span>
+              </label>
+            </div>
+
+            {error && <p className="text-xs text-red-500 dark:text-red-400">{error}</p>}
+
+            <div className="flex gap-2">
+              <button
+                onClick={handleRun}
+                disabled={running || (!includeQa && !includeExplain)}
+                className="flex-1 py-2 rounded-lg bg-amber-600 hover:bg-amber-700 dark:hover:bg-amber-500 text-white text-sm font-medium disabled:opacity-50 transition-colors"
+              >
+                {running ? "Importing…" : "Import"}
+              </button>
+              <button
+                onClick={onClose}
+                className="px-4 py-2 rounded-lg bg-stone-100 dark:bg-stone-800 text-stone-600 dark:text-stone-400 text-sm hover:bg-stone-200 dark:hover:bg-stone-700 transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          </>
+        )}
+
+        {result && (
+          <button
+            onClick={onClose}
+            className="w-full py-2 rounded-lg bg-stone-100 dark:bg-stone-800 text-stone-600 dark:text-stone-400 text-sm hover:bg-stone-200 dark:hover:bg-stone-700 transition-colors"
+          >
+            Close
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function BookCard({ book, onChanged }: Props) {
   const status = STATUS_CONFIG[book.ingest_status] ?? {
     label: book.ingest_status,
@@ -31,6 +141,7 @@ export default function BookCard({ book, onChanged }: Props) {
   const [resettingToc, setResettingToc] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [editingMeta, setEditingMeta] = useState(false);
+  const [migratingHistory, setMigratingHistory] = useState(false);
 
   const cardHref =
     book.ingest_status === "pending_toc_review"
@@ -100,6 +211,18 @@ export default function BookCard({ book, onChanged }: Props) {
     >
       {/* Action buttons — top-right, revealed on hover */}
       <div className="absolute top-2.5 right-2.5 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+        {book.ingest_status === "ready" && (
+          <button
+            onClick={(e) => { e.preventDefault(); e.stopPropagation(); setMigratingHistory(true); }}
+            title="Import reading history as notes"
+            className="w-6 h-6 flex items-center justify-center text-stone-400 hover:text-amber-600 dark:hover:text-amber-400 rounded hover:bg-stone-100 dark:hover:bg-stone-800 transition-colors"
+            aria-label="Import reading history as notes"
+          >
+            <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M3 2h10a1 1 0 0 1 1 1v10.5l-5-2.5-5 2.5V3a1 1 0 0 1 1-1z"/>
+            </svg>
+          </button>
+        )}
         <button
           onClick={handleEditClick}
           title="Edit metadata"
@@ -205,6 +328,12 @@ export default function BookCard({ book, onChanged }: Props) {
             setEditingMeta(false);
             onChanged();
           }}
+        />
+      )}
+      {migratingHistory && (
+        <MigrateHistoryModal
+          book={book}
+          onClose={() => setMigratingHistory(false)}
         />
       )}
     </>
