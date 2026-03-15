@@ -200,7 +200,7 @@ export interface NotesListResponse {
 
 export type AskScope = "whole_library" | "current_book" | "notes";
 
-export type SuggestionType = "new_node" | "merge_node" | "alias" | "new_edge" | "historical_tag";
+export type SuggestionType = "new_node" | "merge_node" | "alias" | "new_edge" | "historical_tag" | "enrich_node";
 export type SuggestionStatus = "pending" | "approved" | "rejected" | "dismissed";
 
 export interface Suggestion {
