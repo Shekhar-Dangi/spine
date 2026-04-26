@@ -5,18 +5,29 @@ Entry points:
   get_active_provider(db, user_id)              — first active profile for user
   get_provider_for_task(task, db, user_id)      — per-task routing (chat tasks)
   get_embedding_provider_for_user(db, user_id)  — embedding-capable profile for "embed" task
+
+All public functions wrap the returned provider in InstrumentedProvider by default
+so every LLM call is automatically logged to the llm_calls table.
+Pass record=False to skip instrumentation (e.g. during health checks).
 """
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from db.models import ModelProfile, ProviderType, TaskProviderMapping
-from providers.base import ProviderConfig
+from providers.base import BaseProvider, ProviderConfig
+from providers.instrumented import InstrumentedProvider
 from providers.key_store import decrypt_key
 from providers.openai_adapter import OpenAIAdapter
 from providers.openrouter_adapter import OpenRouterAdapter
 
 
-async def get_active_provider(db: AsyncSession, user_id: int):
+async def get_active_provider(
+    db: AsyncSession,
+    user_id: int,
+    *,
+    task_name: str | None = None,
+    record: bool = True,
+) -> BaseProvider:
     """Return a provider instance for the first active ModelProfile owned by user."""
     result = await db.execute(
         select(ModelProfile).where(
@@ -27,10 +38,26 @@ async def get_active_provider(db: AsyncSession, user_id: int):
     profile = result.scalar_one_or_none()
     if profile is None:
         raise RuntimeError("No active model profile configured.")
-    return build_provider(profile)
+    provider = build_provider(profile)
+    if record:
+        return InstrumentedProvider(
+            inner=provider,
+            db=db,
+            user_id=user_id,
+            task_name=task_name,
+            provider_type=profile.provider_type.value,
+        )
+    return provider
 
 
-async def get_provider_for_task(routing_task: str, db: AsyncSession, user_id: int):
+async def get_provider_for_task(
+    routing_task: str,
+    db: AsyncSession,
+    user_id: int,
+    *,
+    record: bool = True,
+    monitor_task: str | None = None,
+) -> BaseProvider:
     """
     Return a provider for a specific chat routing task for a given user.
     Looks up TaskProviderMapping first; falls back to the active profile.
@@ -46,11 +73,25 @@ async def get_provider_for_task(routing_task: str, db: AsyncSession, user_id: in
     if mapping is not None and mapping.profile_id is not None:
         profile = await db.get(ModelProfile, mapping.profile_id)
         if profile is not None and profile.user_id == user_id:
-            return build_provider(profile)
-    return await get_active_provider(db, user_id)
+            provider = build_provider(profile)
+            if record:
+                return InstrumentedProvider(
+                    inner=provider,
+                    db=db,
+                    user_id=user_id,
+                    task_name=monitor_task or routing_task,
+                    provider_type=profile.provider_type.value,
+                )
+            return provider
+    return await get_active_provider(db, user_id, task_name=monitor_task or routing_task, record=record)
 
 
-async def get_embedding_provider_for_user(db: AsyncSession, user_id: int):
+async def get_embedding_provider_for_user(
+    db: AsyncSession,
+    user_id: int,
+    *,
+    record: bool = True,
+) -> BaseProvider:
     """
     Return a provider configured for embedding for the given user.
 
@@ -77,7 +118,16 @@ async def get_embedding_provider_for_user(db: AsyncSession, user_id: int):
                     f"Profile '{profile.name}' is mapped to the embed task "
                     "but does not have the 'embedding' capability."
                 )
-            return build_provider(profile)
+            provider = build_provider(profile)
+            if record:
+                return InstrumentedProvider(
+                    inner=provider,
+                    db=db,
+                    user_id=user_id,
+                    task_name="embed",
+                    provider_type=profile.provider_type.value,
+                )
+            return provider
 
     # 2. Fall back to first active embedding-capable profile
     result = await db.execute(
@@ -88,7 +138,16 @@ async def get_embedding_provider_for_user(db: AsyncSession, user_id: int):
     )
     for profile in result.scalars().all():
         if profile.has_capability("embedding"):
-            return build_provider(profile)
+            provider = build_provider(profile)
+            if record:
+                return InstrumentedProvider(
+                    inner=provider,
+                    db=db,
+                    user_id=user_id,
+                    task_name="embed",
+                    provider_type=profile.provider_type.value,
+                )
+            return provider
 
     raise RuntimeError(
         "No embedding profile configured. "
@@ -97,7 +156,7 @@ async def get_embedding_provider_for_user(db: AsyncSession, user_id: int):
     )
 
 
-def build_provider(profile: ModelProfile):
+def build_provider(profile: ModelProfile) -> BaseProvider:
     api_key = decrypt_key(profile.key_ref)
     config = ProviderConfig(
         api_key=api_key,

@@ -26,6 +26,11 @@ class BaseProvider(ABC):
 
     def __init__(self, config: ProviderConfig) -> None:
         self.config = config
+        # Set by adapters after each call: (prompt_tokens, completion_tokens).
+        # None when the provider didn't return usage data.
+        self._last_usage: tuple[int, int] | None = None
+        # Tokens served from prompt cache (subset of prompt_tokens). None if unsupported.
+        self._last_cached_tokens: int | None = None
 
     @abstractmethod
     async def generate_text(

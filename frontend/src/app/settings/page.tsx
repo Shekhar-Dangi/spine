@@ -4,6 +4,7 @@ import ProfileManager from "@/components/settings/ProfileManager";
 import { TaskRoutingManager } from "@/components/settings/ProfileManager";
 import ExplainTemplateManager from "@/components/settings/ExplainTemplateManager";
 import InviteManager from "@/components/settings/InviteManager";
+import LlmStats from "@/components/settings/LlmStats";
 import Link from "next/link";
 import ThemeToggle from "@/components/ui/ThemeToggle";
 import { useAuth } from "@/contexts/AuthContext";
@@ -35,6 +36,8 @@ export default function SettingsPage() {
         <TaskRoutingManager />
         <hr className="border-stone-200 dark:border-stone-800" />
         <ExplainTemplateManager />
+        <hr className="border-stone-200 dark:border-stone-800" />
+        <LlmStats />
         {user?.is_admin && (
           <>
             <hr className="border-stone-200 dark:border-stone-800" />
