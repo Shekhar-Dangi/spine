@@ -266,6 +266,7 @@ class TaskMappingIn(BaseModel):
     explain: int | None = None
     qa: int | None = None
     map_extract: int | None = None
+    geo_extract: int | None = None
     toc_extract: int | None = None
     embed: int | None = None
     extract: int | None = None
