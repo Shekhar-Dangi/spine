@@ -410,14 +410,21 @@ async def stream_explain_chat(
     explain_content: str,
     history: list[dict],
     provider,
+    geo_map_context: str | None = None,
 ) -> AsyncIterator[str]:
     """Stream a chat response grounded in the chapter explanation content."""
-    chat_system = (
-        _SYSTEM
-        + "\n\nYou are discussing a chapter explanation with a reader. "
-        "Help them understand the concepts more deeply based on the explanation provided. "
-        "Answer concisely and precisely."
-    )
+    chat_system = _SYSTEM + "\n\nYou are discussing a chapter explanation with a reader. "
+    if geo_map_context:
+        chat_system += (
+            "Help them understand the concepts more deeply based on the explanation provided. "
+            "Answer concisely and precisely.\n\n"
+            + geo_map_context
+        )
+    else:
+        chat_system += (
+            "Help them understand the concepts more deeply based on the explanation provided. "
+            "Answer concisely and precisely."
+        )
 
     # Cap explanation content to avoid context overflow
     capped = explain_content[:30_000]

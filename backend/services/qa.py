@@ -159,9 +159,16 @@ async def stream_qa(
     chunks = await _retrieve_chunks(book_id, chapter_id, question, db, embed_provider)
     recent_turns = await _get_recent_turns(conv.id, n_pairs=3, db=db)
 
+    from services.geo_map import get_map_context
+    map_ctx = await get_map_context(chapter_id, db) if chapter_id else None
+
+    system_prompt = _SYSTEM
+    if map_ctx:
+        system_prompt = f"{_SYSTEM}\n\n{map_ctx}"
+
     context = assemble_context(selected_text, question, chunks, recent_turns)
     messages = [
-        {"role": "system", "content": _SYSTEM},
+        {"role": "system", "content": system_prompt},
         {"role": "user", "content": context},
     ]
 

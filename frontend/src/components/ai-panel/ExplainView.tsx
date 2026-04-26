@@ -66,7 +66,7 @@ function allModesFor(templates: ExplainTemplate[]): Record<string, ModeState> {
 interface Props { bookId: number }
 
 export default function ExplainView({ bookId }: Props) {
-  const { activeChapterId, chapters } = useBookReader();
+  const { activeChapterId, chapters, activeMapMarker, setActiveMapMarker } = useBookReader();
 
   const [templates] = useState<ExplainTemplate[]>(() => getExplainTemplates());
 
@@ -235,7 +235,11 @@ export default function ExplainView({ bookId }: Props) {
   function sendChatMessage() {
     if (!chatQuestion.trim() || !activeChapterId || chatStreaming) return;
 
-    const q = chatQuestion.trim();
+    const markerPrefix = activeMapMarker
+      ? `[Map context — ${activeMapMarker.place_name}${activeMapMarker.period_label ? ` (${activeMapMarker.period_label})` : ""}: ${activeMapMarker.llm_annotation}]\n`
+      : "";
+    const q = markerPrefix + chatQuestion.trim();
+    setActiveMapMarker(null);
     setChatQuestion("");
     setChatPending(q);
 
@@ -717,7 +721,11 @@ export default function ExplainView({ bookId }: Props) {
             </p>
           )}
           {ms.error && (
-            <p className="text-red-500 dark:text-red-400 text-xs mb-3">{ms.error}</p>
+            <div className="flex items-start gap-2 rounded-md border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-950/40 px-3 py-2 text-xs text-red-700 dark:text-red-300 mb-3">
+              <span className="shrink-0 mt-0.5">⚠</span>
+              <span className="flex-1">{ms.error}</span>
+              <button onClick={() => patchMode(activeMode, { error: null })} className="shrink-0 text-red-400 hover:text-red-600 dark:hover:text-red-200 leading-none">✕</button>
+            </div>
           )}
           {ms.content && (
             <div className="prose prose-sm max-w-none dark:prose-invert
@@ -792,14 +800,30 @@ export default function ExplainView({ bookId }: Props) {
             <div ref={chatBottomRef} />
           </div>
 
-          <div className="shrink-0 border-t border-stone-200 dark:border-stone-800 px-5 py-3 bg-stone-50 dark:bg-stone-900/50">
+          <div className="shrink-0 border-t border-stone-200 dark:border-stone-800 px-5 py-3 bg-stone-50 dark:bg-stone-900/50 space-y-2">
+            {activeMapMarker && (
+              <div className="rounded-lg bg-sky-50 dark:bg-sky-950/30 border border-sky-200 dark:border-sky-800/50 px-3 py-2 text-xs text-stone-600 dark:text-stone-400 leading-5 flex items-start gap-2">
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-3.5 h-3.5 mt-0.5 shrink-0 text-sky-500">
+                  <circle cx="8" cy="8" r="6.5" />
+                  <path d="M1.5 8h13M8 1.5C6 4 5 6 5 8s1 4 3 6.5M8 1.5C10 4 11 6 11 8s-1 4-3 6.5" strokeLinecap="round" />
+                </svg>
+                <span className="flex-1 truncate">
+                  Asking about: <strong>{activeMapMarker.place_name}</strong>
+                  {activeMapMarker.period_label && <span className="text-stone-400"> · {activeMapMarker.period_label}</span>}
+                </span>
+                <button
+                  onClick={() => setActiveMapMarker(null)}
+                  className="shrink-0 text-stone-400 hover:text-stone-600 dark:hover:text-stone-300"
+                >✕</button>
+              </div>
+            )}
             <div className="flex gap-2">
               <input
                 type="text"
                 value={chatQuestion}
                 onChange={(e) => setChatQuestion(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && sendChatMessage()}
-                placeholder="Ask about this explanation…"
+                placeholder={activeMapMarker ? `Ask about ${activeMapMarker.place_name}…` : "Ask about this explanation…"}
                 disabled={chatStreaming}
                 className="flex-1 bg-white dark:bg-stone-800 border border-stone-300 dark:border-stone-700 rounded-lg px-3 py-2 text-sm text-stone-900 dark:text-stone-100 placeholder-stone-400 dark:placeholder-stone-600 outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-600 dark:focus:border-amber-500 disabled:opacity-50 transition-colors"
               />

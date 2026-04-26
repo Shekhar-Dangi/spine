@@ -311,6 +311,88 @@ export interface SearchResponse {
   results: SearchResult[];
 }
 
+// ---------------------------------------------------------------------------
+// LLM Stats
+// ---------------------------------------------------------------------------
+
+export interface LlmStatsSummary {
+  total_calls: number;
+  error_count: number;
+  error_rate: number;
+  total_prompt_tokens: number;
+  total_completion_tokens: number;
+  estimated_cost_usd: number;
+  avg_latency_ms: number;
+}
+
+export interface LlmStatsByTask {
+  task_name: string;
+  calls: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  estimated_cost_usd: number;
+}
+
+export interface LlmStatsByModel {
+  model: string;
+  provider_type: string;
+  calls: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  estimated_cost_usd: number;
+}
+
+export interface LlmStatsByDay {
+  date: string;
+  calls: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  estimated_cost_usd: number;
+}
+
+export interface LlmStats {
+  period: string;
+  from_date: string | null;
+  to_date: string;
+  summary: LlmStatsSummary;
+  by_task: LlmStatsByTask[];
+  by_model: LlmStatsByModel[];
+  by_day: LlmStatsByDay[];
+}
+
+// ---------------------------------------------------------------------------
+// Geographic Map
+// ---------------------------------------------------------------------------
+
+export type GeoMapStatus = "generating" | "ready" | "failed";
+export type MarkerType = "city" | "region" | "battle" | "route" | "other";
+export type GeoConfidence = "high" | "medium" | "low";
+
+export interface GeoMarker {
+  id: number;
+  place_name: string;
+  latitude: number;
+  longitude: number;
+  marker_type: MarkerType;
+  period_label: string | null;
+  llm_annotation: string;
+  user_annotation: string | null;
+  confidence: GeoConfidence;
+}
+
+export interface GeoMap {
+  id: number;
+  chapter_id: number;
+  book_id: number;
+  status: GeoMapStatus;
+  period_label: string | null;
+  period_start_year: number | null;
+  period_end_year: number | null;
+  error_message: string | null;
+  generated_at: string | null;
+  markers: GeoMarker[];
+}
+
 /** A suggested chapter entry returned by POST /toc/suggest. */
 export interface SuggestedChapter {
   index: number;

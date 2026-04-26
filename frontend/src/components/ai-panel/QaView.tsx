@@ -12,7 +12,7 @@ import type { ConversationMessage } from "@/types";
 interface Props { bookId: number }
 
 export default function QaView({ bookId }: Props) {
-  const { activeChapterId, selectedText, setSelectedText } = useBookReader();
+  const { activeChapterId, selectedText, setSelectedText, activeMapMarker, setActiveMapMarker } = useBookReader();
   const [messages, setMessages] = useState<ConversationMessage[]>([]);
   const [streamingContent, setStreamingContent] = useState<string | null>(null);
   const [pendingQuestion, setPendingQuestion] = useState<string | null>(null);
@@ -49,7 +49,12 @@ export default function QaView({ bookId }: Props) {
   const handleAsk = () => {
     if (!question.trim() || !activeChapterId || loading) return;
 
-    const q = question.trim();
+    // Prepend map marker context if a place is selected on the chapter map
+    const markerPrefix = activeMapMarker
+      ? `[Map context — ${activeMapMarker.place_name}${activeMapMarker.period_label ? ` (${activeMapMarker.period_label})` : ""}: ${activeMapMarker.llm_annotation}]\n`
+      : "";
+    const q = markerPrefix + question.trim();
+    setActiveMapMarker(null);
     setQuestion("");
     setError(null);
     setStreamingContent("");
@@ -171,7 +176,11 @@ export default function QaView({ bookId }: Props) {
         )}
 
         {error && (
-          <p className="text-red-500 dark:text-red-400 text-xs">{error}</p>
+          <div className="flex items-start gap-2 rounded-md border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-950/40 px-3 py-2 text-xs text-red-700 dark:text-red-300">
+            <span className="shrink-0 mt-0.5">⚠</span>
+            <span className="flex-1">{error}</span>
+            <button onClick={() => setError(null)} className="shrink-0 text-red-400 hover:text-red-600 dark:hover:text-red-200 leading-none">✕</button>
+          </div>
         )}
 
         <div ref={bottomRef} />
@@ -189,6 +198,25 @@ export default function QaView({ bookId }: Props) {
       {/* Input area */}
       {!selectMode && (
         <div className="shrink-0 border-t border-stone-200 dark:border-stone-800 px-5 py-3 space-y-2 bg-stone-50 dark:bg-stone-900/50">
+          {activeMapMarker && (
+            <div className="rounded-lg bg-sky-50 dark:bg-sky-950/30 border border-sky-200 dark:border-sky-800/50 px-3 py-2 text-xs text-stone-600 dark:text-stone-400 leading-5 relative flex items-start gap-2">
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-3.5 h-3.5 mt-0.5 shrink-0 text-sky-500">
+                <circle cx="8" cy="8" r="6.5" />
+                <path d="M1.5 8h13M8 1.5C6 4 5 6 5 8s1 4 3 6.5M8 1.5C10 4 11 6 11 8s-1 4-3 6.5" strokeLinecap="round" />
+              </svg>
+              <span className="flex-1 truncate">
+                Asking about: <strong>{activeMapMarker.place_name}</strong>
+                {activeMapMarker.period_label && <span className="text-stone-400"> · {activeMapMarker.period_label}</span>}
+              </span>
+              <button
+                onClick={() => setActiveMapMarker(null)}
+                className="shrink-0 text-stone-400 hover:text-stone-600 dark:hover:text-stone-300"
+                aria-label="Clear map marker"
+              >
+                ✕
+              </button>
+            </div>
+          )}
           {selectedText && (
             <div className="rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/50 px-3 py-2 text-xs text-stone-600 dark:text-stone-400 leading-5 relative">
               <p className="line-clamp-2 italic pr-5">"{selectedText}"</p>

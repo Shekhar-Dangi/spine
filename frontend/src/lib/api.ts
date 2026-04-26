@@ -401,6 +401,49 @@ export const api = {
     },
   },
 
+  llmStats: {
+    get: (period: "7d" | "30d" | "90d" | "all" = "30d") =>
+      req<import("@/types").LlmStats>(`/api/llm-stats?period=${period}`),
+  },
+
+  geoMap: {
+    get: (bookId: number, chapterId: number) =>
+      req<import("@/types").GeoMap>(
+        `/api/books/${bookId}/chapters/${chapterId}/geo-map`
+      ),
+    generate: (bookId: number, chapterId: number) =>
+      req<{ status: string; chapter_id: number }>(
+        `/api/books/${bookId}/chapters/${chapterId}/geo-map/generate`,
+        { method: "POST" }
+      ),
+    updateMarker: (markerId: number, userAnnotation: string | null) =>
+      req<import("@/types").GeoMarker>(`/api/geo-markers/${markerId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_annotation: userAnnotation }),
+      }),
+    addMarker: (
+      bookId: number,
+      chapterId: number,
+      body: {
+        place_name: string;
+        latitude: number;
+        longitude: number;
+        marker_type?: string;
+        period_label?: string | null;
+        user_annotation?: string | null;
+      }
+    ) =>
+      req<import("@/types").GeoMarker>(
+        `/api/books/${bookId}/chapters/${chapterId}/geo-map/markers`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        }
+      ),
+  },
+
   search: {
     query: (q: string, limit = 20) => {
       const qs = new URLSearchParams({ q, limit: String(limit) });

@@ -261,7 +261,11 @@ export default function AskPage() {
           )}
 
           {error && (
-            <p className="text-red-500 dark:text-red-400 text-sm">{error}</p>
+            <div className="flex items-start gap-2 rounded-md border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-950/40 px-3 py-2 text-sm text-red-700 dark:text-red-300">
+              <span className="shrink-0 mt-0.5">⚠</span>
+              <span className="flex-1">{error}</span>
+              <button onClick={() => setError(null)} className="shrink-0 text-red-400 hover:text-red-600 dark:hover:text-red-200 leading-none">✕</button>
+            </div>
           )}
 
           <div ref={bottomRef} />

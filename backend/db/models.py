@@ -443,7 +443,7 @@ class ModelProfile(Base):
 
 # Canonical routing task names.
 # "embed" requires an embedding-capable profile; all others require chat-capable.
-ROUTING_TASKS = ("dossier", "explain", "qa", "map_extract", "toc_extract", "embed", "extract")
+ROUTING_TASKS = ("dossier", "explain", "qa", "map_extract", "toc_extract", "embed", "extract", "geo_extract")
 
 # Which capability each task requires
 TASK_REQUIRED_CAPABILITY: dict[str, str] = {
@@ -454,6 +454,7 @@ TASK_REQUIRED_CAPABILITY: dict[str, str] = {
     "toc_extract": "chat",
     "embed": "embedding",
     "extract": "chat",
+    "geo_extract": "chat",
 }
 
 
@@ -954,4 +955,115 @@ class NoteChunk(Base):
     embedding = mapped_column(Vector(), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
-    note: Mapped["Note"] = relationship()
+
+# ---------------------------------------------------------------------------
+# LLM Call Log
+# ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# Geographic Map Layer
+# ---------------------------------------------------------------------------
+
+
+class GeoMapStatus(str, enum.Enum):
+    GENERATING = "generating"
+    READY = "ready"
+    FAILED = "failed"
+
+
+class MarkerType(str, enum.Enum):
+    CITY = "city"
+    REGION = "region"
+    BATTLE = "battle"
+    ROUTE = "route"
+    OTHER = "other"
+
+
+class GeoConfidence(str, enum.Enum):
+    HIGH = "high"
+    MEDIUM = "medium"
+    LOW = "low"
+
+
+class GeoMap(Base):
+    """Geographic map generated for a chapter — places extracted via LLM."""
+    __tablename__ = "geo_maps"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    book_id: Mapped[int] = mapped_column(
+        ForeignKey("books.id", ondelete="CASCADE"), nullable=False
+    )
+    chapter_id: Mapped[int] = mapped_column(
+        ForeignKey("chapters.id", ondelete="CASCADE"), nullable=False, unique=True
+    )
+    status: Mapped[GeoMapStatus] = mapped_column(
+        Enum(GeoMapStatus, name="geomapstatus"), nullable=False, default=GeoMapStatus.GENERATING
+    )
+    period_label: Mapped[str | None] = mapped_column(Text, nullable=True)
+    period_start_year: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    period_end_year: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    generated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+    markers: Mapped[list["GeoMarker"]] = relationship(
+        back_populates="geo_map", cascade="all, delete-orphan"
+    )
+
+
+class GeoMarker(Base):
+    """A geographic place marker on a chapter's geo map."""
+    __tablename__ = "geo_markers"
+    __table_args__ = (
+        Index("ix_geo_markers_geo_map_id", "geo_map_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    geo_map_id: Mapped[int] = mapped_column(
+        ForeignKey("geo_maps.id", ondelete="CASCADE"), nullable=False
+    )
+    place_name: Mapped[str] = mapped_column(Text, nullable=False)
+    latitude: Mapped[float] = mapped_column(Float, nullable=False)
+    longitude: Mapped[float] = mapped_column(Float, nullable=False)
+    marker_type: Mapped[MarkerType] = mapped_column(
+        Enum(MarkerType, name="markertype"), nullable=False, default=MarkerType.OTHER
+    )
+    period_label: Mapped[str | None] = mapped_column(Text, nullable=True)
+    llm_annotation: Mapped[str] = mapped_column(Text, nullable=False)
+    user_annotation: Mapped[str | None] = mapped_column(Text, nullable=True)
+    confidence: Mapped[GeoConfidence] = mapped_column(
+        Enum(GeoConfidence, name="geoconfidence"), nullable=False, default=GeoConfidence.MEDIUM
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+    geo_map: Mapped["GeoMap"] = relationship(back_populates="markers")
+
+
+# ---------------------------------------------------------------------------
+# LLM Call Log
+# ---------------------------------------------------------------------------
+
+
+class LlmCall(Base):
+    """One record per LLM API call — used for monitoring, cost tracking, and usage stats."""
+    __tablename__ = "llm_calls"
+    __table_args__ = (
+        Index("ix_llm_calls_user_created", "user_id", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    task_name: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    model: Mapped[str] = mapped_column(String(256), nullable=False)
+    provider_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    is_streaming: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    prompt_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    completion_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    estimated_cost_usd: Mapped[float | None] = mapped_column(Float, nullable=True)
+    latency_ms: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False)  # "success" | "error"
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)

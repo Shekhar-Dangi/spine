@@ -4,6 +4,7 @@ import Link from "next/link";
 import { BookReaderProvider } from "@/contexts/BookReaderContext";
 import ReaderPanel from "./ReaderPanel";
 import AiPanel from "@/components/ai-panel/AiPanel";
+import GeoMapWidget from "@/components/map/GeoMapWidget";
 import ThemeToggle from "@/components/ui/ThemeToggle";
 import { api } from "@/lib/api";
 
@@ -16,6 +17,7 @@ export default function ReaderShell({ bookId }: Props) {
   const [aiWide, setAiWide] = useState(false);
   const [mobilePanel, setMobilePanel] = useState<"reader" | "ai">("reader");
   const [bookTitle, setBookTitle] = useState<string | null>(null);
+  const [mapOpen, setMapOpen] = useState(false);
 
   useEffect(() => {
     api.books.get(bookId).then((b) => setBookTitle(b.title)).catch(() => {});
@@ -138,6 +140,27 @@ export default function ReaderShell({ bookId }: Props) {
         </div>
 
       </div>
+
+      {/* Floating map toggle button */}
+      <button
+        onClick={() => setMapOpen((o) => !o)}
+        title={mapOpen ? "Close map" : "Open geographic map"}
+        className={`fixed bottom-4 right-4 z-50 w-10 h-10 rounded-full shadow-lg flex items-center justify-center transition-colors ${
+          mapOpen
+            ? "bg-amber-600 text-white"
+            : "bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-500 dark:text-stone-400 hover:text-amber-600 dark:hover:text-amber-400"
+        }`}
+      >
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-4 h-4">
+          <circle cx="8" cy="8" r="6.5" />
+          <path d="M1.5 8h13M8 1.5C6 4 5 6 5 8s1 4 3 6.5M8 1.5C10 4 11 6 11 8s-1 4-3 6.5" strokeLinecap="round" />
+        </svg>
+      </button>
+
+      {/* Floating geo map widget */}
+      {mapOpen && (
+        <GeoMapWidget bookId={bookId} onClose={() => setMapOpen(false)} />
+      )}
     </BookReaderProvider>
   );
 }

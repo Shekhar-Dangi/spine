@@ -331,7 +331,7 @@ async def explain_chat(
         raise HTTPException(status_code=422, detail="Question cannot be empty.")
 
     from providers.registry import get_provider_for_task
-    provider = await get_provider_for_task("explain", db, current_user.id)
+    provider = await get_provider_for_task("explain", db, current_user.id, monitor_task="explain_chat")
 
     async def event_stream():
         # Get or create conversation
@@ -356,11 +356,16 @@ async def explain_chat(
         ))
         await db.commit()
 
+        # Load geo map context if available for this chapter
+        from services.geo_map import get_map_context
+        geo_map_ctx = await get_map_context(chapter_id, db)
+
         # Stream and accumulate
         accumulated: list[str] = []
         try:
             async for delta in explain_svc.stream_explain_chat(
-                body.question, body.explain_content, history_dicts, provider
+                body.question, body.explain_content, history_dicts, provider,
+                geo_map_context=geo_map_ctx,
             ):
                 accumulated.append(delta)
                 escaped = delta.replace("\n", "\\n")
