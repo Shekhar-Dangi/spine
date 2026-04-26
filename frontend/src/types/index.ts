@@ -115,7 +115,8 @@ export type RoutingTask =
   | "map_extract"
   | "toc_extract"
   | "embed"
-  | "extract";
+  | "extract"
+  | "geo_extract";
 
 /** Which capability each task requires. */
 export const TASK_REQUIRED_CAPABILITY: Record<RoutingTask, ModelCapability> = {
@@ -126,6 +127,7 @@ export const TASK_REQUIRED_CAPABILITY: Record<RoutingTask, ModelCapability> = {
   toc_extract: "chat",
   embed: "embedding",
   extract: "chat",
+  geo_extract: "chat",
 };
 
 /** task_name → profile_id (null = use active/fallback profile). */

@@ -417,6 +417,7 @@ const TASK_LABELS: Record<RoutingTask, string> = {
   toc_extract: "TOC Suggestion (LLM)",
   embed: "Embedding (book indexing + search)",
   extract: "Knowledge Extraction",
+  geo_extract: "Geographic Map Extraction",
 };
 
 const ROUTING_TASKS: RoutingTask[] = [
@@ -424,6 +425,7 @@ const ROUTING_TASKS: RoutingTask[] = [
   "explain",
   "qa",
   "map_extract",
+  "geo_extract",
   "toc_extract",
   "embed",
   "extract",
