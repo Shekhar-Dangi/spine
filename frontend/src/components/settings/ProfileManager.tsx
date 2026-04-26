@@ -438,6 +438,7 @@ export function TaskRoutingManager() {
     explain: null,
     qa: null,
     map_extract: null,
+    geo_extract: null,
     toc_extract: null,
     embed: null,
     extract: null,
